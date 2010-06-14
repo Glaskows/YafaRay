@@ -53,7 +53,7 @@ private:
 	int maxDepth;
 	bound_t treeBound;
 	octNode_t<NodeData> root;
-	rwlock_t lock;
+        yafthreads::rwlock_t lock;
 };
 
 // octree_t Method Definitions
