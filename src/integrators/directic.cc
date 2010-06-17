@@ -31,6 +31,8 @@
 #include <utilities/mathOptimizations.h>
 #include <utilities/mcqmc.h>
 
+#include <ctime>
+
 //#include <core_api/qtfilm.h>
 
 #include <sstream>
@@ -40,7 +42,7 @@ __BEGIN_YAFRAY
 //! Stratified hemisphere for getting random direction vectors distributed proportionally to the cosine term.
 struct stratifiedHemisphere {
 	stratifiedHemisphere(int nm, int nn):M(nm),N(nn) {}
-	stratifiedHemisphere(int nm):M(nm) { N = M_PI * M; } //!< we get similar division in both direction with N = pi * M
+	stratifiedHemisphere(int nm):M(nm), rnd((unsigned)time(0)) { N = M_PI * M; } //!< we get similar division in both direction with N = pi * M
 	vector3d_t getSample(int j, int k); //!< get random direction sample from section j,k in local coordinate system
 	//int getNumSamples() { return M*N; }
 	int M; //!< number of divisions along theta
@@ -61,16 +63,14 @@ vector3d_t stratifiedHemisphere::getSample(int j, int k) {
 }
 
 //! Record of Irradiance Cache (1 bounce and direct lighting)
-struct icRec_t
+struct icRec_t : surfacePoint_t
 {
-	icRec_t(int m):stratHemi(m) {}//!< number of total sections are nSamples = pi*m^2
+	icRec_t(int m):stratHemi(m) { }//!< number of total sections are nSamples = pi*m^2
 	//color_t		estimateIrradiance(color_t *li); //!< calculate the irradiance by averaging all the incoming radiance
-	color_t		getSampleHemisphere(int j, int k, const surfacePoint_t &sp); //!< compute indirect light with direct lighting of first bounce
-	float		radius; //!< should be proportional to w
-	float		w; //!< weight of the sample
-	point3d_t	pos; //!< record location
-	normal_t	n; //!< surface normal at pos
-	color_t		irr; //!< cached irradiance
+	vector3d_t		getSampleHemisphere(int j, int k); //!< compute indirect light with direct lighting of first bounce
+	float			radius; //!< should be proportional to w
+	float			w; //!< weight of the sample
+	color_t			irr; //!< cached irradiance
 	// ToDo: add rotation and translation gradients
 	// ToDo: add distance to surfaces, minimum and maximum spacing threshold (for neighbor clamping)
 	// ToDo: adaptative sampling
@@ -87,7 +87,7 @@ struct icRec_t
 	return result;
 }*/
 
-vector3d_t icRec_t::getSampleHemisphere(int j, int k, const surfacePoint_t &sp) {
+vector3d_t icRec_t::getSampleHemisphere(int j, int k) {
 	vector3d_t dir; // temporal object to avoid innecesary frequent object creation
 	//irr.black();
 	//surfacePoint_t hitSp;
@@ -96,7 +96,7 @@ vector3d_t icRec_t::getSampleHemisphere(int j, int k, const surfacePoint_t &sp) 
 			// get stratified sample
 			dir = stratHemi.getSample(j, k);
 			// convert to world coordinate system
-			dir = sp.U * dir.x + sp.V * dir.y + sp.N * dir.z;
+			dir = NU * dir.x + NV * dir.y + N * dir.z;
 			// obtain sample outgoing radiance in sample direction
 	//		diffRay_t lRay(sp.P, dir, MIN_RAYDIST);
 	//		if (scene.intersect(lRay, hitSp)) {
@@ -105,6 +105,7 @@ vector3d_t icRec_t::getSampleHemisphere(int j, int k, const surfacePoint_t &sp) 
 	//		}
 	//	}
 	//}
+	return dir;
 }
 
 class icTree_t : public octree_t<icRec_t>
@@ -112,7 +113,7 @@ class icTree_t : public octree_t<icRec_t>
 	void add(const icRec_t &rec) //NodeData &dat, const bound_t &bound)
 	{
 		// bounding box that cover record sphere
-		bound_t bound(rec.pos-rec.radius, rec.pos+rec.radius);
+		bound_t bound(rec.P - rec.radius, rec.P +rec.radius);
 		lock.writeLock();
 		recursiveAdd(&root, treeBound, rec, bound,
 					 (bound.a - bound.g).lengthSqr() );
@@ -126,7 +127,6 @@ public:
 	directIC_t(bool transpShad=false, int shadowDepth=4, int rayDepth=6);
 	virtual bool preprocess();
 	virtual colorA_t integrate(renderState_t &state, diffRay_t &ray) const;
-	virtual bool render(imageFilm_t *image);
 	static integrator_t* factory(paraMap_t &params, renderEnvironment_t &render);
 };
 
@@ -185,54 +185,56 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 {
 	color_t col(0.0);
 	float alpha = 0.0;
-	surfacePoint_t sp;
+	//surfacePoint_t sp;
 	void *o_udat = state.userdata;
 	bool oldIncludeLights = state.includeLights;
 
-	// temporal variables for indirect illumination calculus
-	stratifiedHemisphere sphere(25);
-	vector3d_t irrDir;
-	surfacePoint_t irrSp;
-	color_t irrC;
+	icRec_t icRecord(5);
 
 	// Shoot ray into scene
 
-	if(scene->intersect(ray, sp)) // If it hits
+	if(scene->intersect(ray, icRecord)) // If it hits
 	{
 		unsigned char userdata[USER_DATA_SIZE];
-		const material_t *material = sp.material;
+		const material_t *material = icRecord.material;
 		BSDF_t bsdfs;
 
 		state.userdata = (void *) userdata;
 		vector3d_t wo = -ray.dir;
 		if(state.raylevel == 0) state.includeLights = true;
 
-		material->initBSDF(state, sp, bsdfs);
+		vector3d_t wl;
 
-		if(bsdfs & BSDF_EMIT) col += material->emit(state, sp, wo);
+		material->initBSDF(state, icRecord, bsdfs);
+
+		if(bsdfs & BSDF_EMIT) col += material->emit(state, icRecord, wo);
 
 		if(bsdfs & BSDF_DIFFUSE)
 		{
-			col += estimateAllDirectLight(state, sp, wo);
-			col += estimateCausticPhotons(state, sp, wo);
-			// if(useAmbientOcclusion) col += sampleAmbientOcclusion(state, sp, wo);
-			// col += estimateDiffuseIC(state, sp, wo);
-			for (int j=0; j<sphere.M; i++) {
-				for (int k=0; k<sphere.N; k++) {
-					irrDir = sphere.getSample(j, k, sp);
-					diffRay_t lRay(sp.P, dir, MIN_RAYDIST);
-					if (scene->intersect(lRay, irrSp)) {
-						irrC += estimateAllDirectLight(state, irrSp, -lRay.dir);
+			col += estimateAllDirectLight(state, icRecord, wo);
+			col += estimateCausticPhotons(state, icRecord, wo);
+			if(useAmbientOcclusion) col += sampleAmbientOcclusion(state, icRecord, wo);
+			surfacePoint_t sp;
+			for (int j=0; j<icRecord.stratHemi.M; j++) {
+				for (int k=0; k<icRecord.stratHemi.N; k++) {
+					ray_t lRay(icRecord.P, icRecord.getSampleHemisphere(j, k));
+					if (scene->intersect(lRay, sp)) {
+						if (! (sp.material->getFlags() & BSDF_EMIT) ) {
+							icRecord.irr += estimateAllDirectLight(state, sp, -lRay.dir) *
+											icRecord.material->eval(state, icRecord, -lRay.dir, wl, BSDF_DIFFUSE);
+						}
+					} else {
+						if (background) icRecord.irr += (*background)(lRay, state, false);
 					}
 				}
 			}
-			irrC = irrC / sphere.M*N;
-			col += irrC;
+			icRecord.irr = icRecord.irr / (icRecord.stratHemi.M * icRecord.stratHemi.N);
+			col += icRecord.irr;
 		}
 
-		recursiveRaytrace(state, ray, bsdfs, sp, wo, col, alpha);
+		recursiveRaytrace(state, ray, bsdfs, icRecord, wo, col, alpha);
 
-		float m_alpha = material->getAlpha(state, sp, wo);
+		float m_alpha = material->getAlpha(state, icRecord, wo);
 		alpha = m_alpha + (1.f - m_alpha) * alpha;
 	}
 	else // Nothing hit, return background if any
@@ -243,13 +245,6 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 	state.userdata = o_udat;
 	state.includeLights = oldIncludeLights;
 	return colorA_t(col, alpha);
-}
-
-bool directIC_t::render(imageFilm_t *image)
-{
-    //((mcIntegrator_t *)this)->render(image);
-    Y_INFO << "HOLA!!!";
-    return true;
 }
 
 integrator_t* directIC_t::factory(paraMap_t &params, renderEnvironment_t &render)
