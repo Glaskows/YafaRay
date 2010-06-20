@@ -66,8 +66,8 @@ vector3d_t stratifiedHemisphere::getSample(int j, int k) {
 struct icRec_t : surfacePoint_t
 {
 	icRec_t(int m):stratHemi(m) { }//!< number of total sections are nSamples = pi*m^2
-	//color_t		estimateIrradiance(color_t *li); //!< calculate the irradiance by averaging all the incoming radiance
-	vector3d_t		getSampleHemisphere(int j, int k); //!< compute indirect light with direct lighting of first bounce
+	/*color_t		estimateIrradiance(scene_t scene, color_t *li); //!< calculate the irradiance by averaging all the incoming radiance*/
+	vector3d_t		getSampleHemisphere(int j, int k, const vector3d_t &wo); //!< compute indirect light with direct lighting of first bounce
 	float			radius; //!< should be proportional to w
 	float			w; //!< weight of the sample
 	color_t			irr; //!< cached irradiance
@@ -87,7 +87,7 @@ struct icRec_t : surfacePoint_t
 	return result;
 }*/
 
-vector3d_t icRec_t::getSampleHemisphere(int j, int k) {
+vector3d_t icRec_t::getSampleHemisphere(int j, int k, const vector3d_t &wo) {
 	vector3d_t dir; // temporal object to avoid innecesary frequent object creation
 	//irr.black();
 	//surfacePoint_t hitSp;
@@ -95,8 +95,8 @@ vector3d_t icRec_t::getSampleHemisphere(int j, int k) {
 	//	for (int k=0; k<stratHemi.N; k++) {
 			// get stratified sample
 			dir = stratHemi.getSample(j, k);
-			// convert to world coordinate system
-			dir = NU * dir.x + NV * dir.y + N * dir.z;
+			vector3d_t norm = FACE_FORWARD(Ng, N, wo);
+			dir = NU*dir.x + NV*dir.y + norm*dir.z;
 			// obtain sample outgoing radiance in sample direction
 	//		diffRay_t lRay(sp.P, dir, MIN_RAYDIST);
 	//		if (scene.intersect(lRay, hitSp)) {
@@ -185,46 +185,57 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 {
 	color_t col(0.0);
 	float alpha = 0.0;
-	//surfacePoint_t sp;
 	void *o_udat = state.userdata;
 	bool oldIncludeLights = state.includeLights;
 
 	icRec_t icRecord(5);
-
 	// Shoot ray into scene
-
 	if(scene->intersect(ray, icRecord)) // If it hits
 	{
-		unsigned char userdata[USER_DATA_SIZE];
+		// create new memory on stack for material setup
+		unsigned char *newUserData[USER_DATA_SIZE];
+		state.userdata = (void *)newUserData;
 		const material_t *material = icRecord.material;
 		BSDF_t bsdfs;
+		material->initBSDF(state, icRecord, bsdfs);
 
-		state.userdata = (void *) userdata;
 		vector3d_t wo = -ray.dir;
 		if(state.raylevel == 0) state.includeLights = true;
 
-		vector3d_t wl;
-
-		material->initBSDF(state, icRecord, bsdfs);
-
+		// obtain material self emitance
 		if(bsdfs & BSDF_EMIT) col += material->emit(state, icRecord, wo);
 
 		if(bsdfs & BSDF_DIFFUSE)
 		{
+			// obtain direct illumination
 			col += estimateAllDirectLight(state, icRecord, wo);
 			col += estimateCausticPhotons(state, icRecord, wo);
 			if(useAmbientOcclusion) col += sampleAmbientOcclusion(state, icRecord, wo);
-			surfacePoint_t sp;
+
+			ray_t sRay; // ray from hitpoint to hemisphere sample direction
+			sRay.from = icRecord.P;
+			surfacePoint_t sp; // surface point hit after 1 bounce
+			vector3d_t swi; // incoming radiance direction, useless for lambertian diffuse component
+			vector3d_t swo;
 			for (int j=0; j<icRecord.stratHemi.M; j++) {
 				for (int k=0; k<icRecord.stratHemi.N; k++) {
-					ray_t lRay(icRecord.P, icRecord.getSampleHemisphere(j, k));
-					if (scene->intersect(lRay, sp)) {
-						if (! (sp.material->getFlags() & BSDF_EMIT) ) {
-							icRecord.irr += estimateAllDirectLight(state, sp, -lRay.dir) *
-											icRecord.material->eval(state, icRecord, -lRay.dir, wl, BSDF_DIFFUSE);
+					// sample ray setup
+					sRay.tmin = 0.0005;
+					sRay.tmax = -1.0;
+					sRay.dir = icRecord.getSampleHemisphere(j, k, wo);
+					// Calculate each incoming radiance of hemisphere at point icRecord
+					if (scene->intersect(sRay, sp)) {
+						BSDF_t matBSDFs = sp.material->getFlags();
+						sp.material->initBSDF(state, sp, matBSDFs);
+						swo = -sRay.dir;
+						if (! (matBSDFs & BSDF_EMIT) ) {
+							if (matBSDFs & (BSDF_DIFFUSE | BSDF_GLOSSY)) {
+								icRecord.irr += (estimateAllDirectLight(state, sp, swo) *
+												icRecord.material->eval(state, icRecord, swo, swi, BSDF_DIFFUSE));
+							}
 						}
 					} else {
-						if (background) icRecord.irr += (*background)(lRay, state, false);
+						if (background) icRecord.irr += (*background)(sRay, state, false);
 					}
 				}
 			}
@@ -232,6 +243,7 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 			col += icRecord.irr;
 		}
 
+		// Reflective?, Refractive?
 		recursiveRaytrace(state, ray, bsdfs, icRecord, wo, col, alpha);
 
 		float m_alpha = material->getAlpha(state, icRecord, wo);
