@@ -31,6 +31,8 @@
 #include <utilities/mathOptimizations.h>
 #include <utilities/mcqmc.h>
 
+#include <limits>
+
 #include <ctime>
 
 //#include <core_api/qtfilm.h>
@@ -65,16 +67,27 @@ vector3d_t stratifiedHemisphere::getSample(int j, int k) {
 //! Record of Irradiance Cache (1 bounce and direct lighting)
 struct icRec_t : surfacePoint_t
 {
-	icRec_t(int m):stratHemi(m) { }//!< number of total sections are nSamples = pi*m^2
+	icRec_t(int m, float kappa):stratHemi(m),kappa(kappa) { radius = std::numeric_limits<float>::max(); }//!< number of total sections are nSamples = pi*m^2
 	/*color_t		estimateIrradiance(scene_t scene, color_t *li); //!< calculate the irradiance by averaging all the incoming radiance*/
-	vector3d_t		getSampleHemisphere(int j, int k, const vector3d_t &wo); //!< compute indirect light with direct lighting of first bounce
-	float			radius; //!< should be proportional to w
 	float			w; //!< weight of the sample
 	color_t			irr; //!< cached irradiance
+	vector3d_t		getSampleHemisphere(int j, int k, const vector3d_t &wo); //!< compute indirect light with direct lighting of first bounce
+	float			getWeight(const surfacePoint_t &p) const;
+	float			getRadius() const { return radius; }
+	float			getInvRadius() const { return invRadius; }
+	bound_t			getBound() const; //!< get the bounding box of the sample sphere
+	void			changeRadius(float newr); //!< change radius if it needs too given the new one
+	int				getM() const { return stratHemi.M; } //!< return the number of division if hemisphere along theta
+	int				getN() const { return stratHemi.N; } //!< return the number of division if hemisphere along phi
 	// ToDo: add rotation and translation gradients
 	// ToDo: add distance to surfaces, minimum and maximum spacing threshold (for neighbor clamping)
 	// ToDo: adaptative sampling
+	static const float NORMALIZATION_TERM = 8.113140441; //!< from T&L weight function normalization term 1/sqrt(1-cos10°) for 10°
+private:
 	stratifiedHemisphere stratHemi; //!< sampling hemisphere at point location
+	float			kappa; //!< overall changing accuaracy constant
+	float			radius; //!< should be proportional to w
+	float			invRadius; //!< inverse of radius
 };
 
 /*color_t icRec_t::estimateIrradiance(color_t *li) {
@@ -108,18 +121,71 @@ vector3d_t icRec_t::getSampleHemisphere(int j, int k, const vector3d_t &wo) {
 	return dir;
 }
 
-class icTree_t : public octree_t<icRec_t>
+void icRec_t::changeRadius(float newr) {
+	// we use minimal distance radius (without clamping for now)
+	if (newr < radius) {
+		radius = newr;
+		invRadius = 1.f / radius;
+	}
+}
+
+float icRec_t::getWeight(const surfacePoint_t &sp) const {
+	float epPos = 2 * (P - sp.P).length() * invRadius;
+	float epNor = fSqrt(1 - N * sp.N) * NORMALIZATION_TERM; // TODO: needs FACE_FORWARD restriction?
+	return 1 - kappa * fmax(epPos, epNor);
+}
+
+bound_t icRec_t::getBound() const {
+	return bound_t(P - radius, P + radius);
+}
+
+struct icTree_t : public octree_t<icRec_t>
 {
-	void add(const icRec_t &rec) //NodeData &dat, const bound_t &bound)
+	icTree_t(const bound_t &bound):octree_t<icRec_t>(bound) {}
+	//! Get irradiance estimation at point p. Return false if there isn't a cached irradiance sample near.
+	bool getIrradiance(const surfacePoint_t &p, color_t &irr);
+	//! Add a new cached irradiance sample
+	void add(const icRec_t &rec)
 	{
-		// bounding box that cover record sphere
-		bound_t bound(rec.P - rec.radius, rec.P +rec.radius);
 		lock.writeLock();
-		recursiveAdd(&root, treeBound, rec, bound,
-					 (bound.a - bound.g).lengthSqr() );
+		recursiveAdd(&root, treeBound, rec, rec.getBound(),
+					 2*rec.getRadius()*M_SQRT3 ); // 2*r*sqrt(3) = (bound.a - bound.g).length
 		lock.unlock();
 	}
+	//bool isNear(surfacePoint_t &p);
+	void setBound(const bound_t &bound) { treeBound = bound; }
+	struct icLookup_t {
+		icLookup_t(const surfacePoint_t &sp): sp(sp) {}
+		std::vector<color_t> radSamples;
+		const surfacePoint_t sp;
+		bool operator()(const point3d_t &p, const icRec_t &);
+		float totalWeight;
+	};
 };
+
+bool icTree_t::icLookup_t::operator()(const point3d_t &p, const icRec_t &sample) {
+	float weight = sample.getWeight(sp);
+	if (weight > 0.f) { // TODO: see if weight > 0 is correct or should be a small number
+		// get weighted irradiance sample = E_i(p) * w_i(p)
+		radSamples.push_back( sample.irr * (weight / (sample.getM() * sample.getN()) ) ); // TODO: optimize division?
+		totalWeight += weight;
+	}
+	return true; // when could it be false? example?
+}
+
+bool icTree_t::getIrradiance(const surfacePoint_t &sp, color_t &wIrr) {
+	icLookup_t lookupProc(sp);
+	lookup(sp.P, lookupProc); // ads weighted radiance values to vector
+	// if there is no good irradiance sample return false
+	if (lookupProc.radSamples.size() == 0)
+		return false;
+	// calculate Sum(E_i(p) * w_i(p))
+	for (unsigned int i=0; i<lookupProc.radSamples.size(); i++) {
+		wIrr += lookupProc.radSamples[i];
+	}
+	wIrr = wIrr / lookupProc.totalWeight; // E(p) = Sum(E_i(p) * w_i(p)) / Sum(w_i(p))
+	return true;
+}
 
 class YAFRAYPLUGIN_EXPORT directIC_t: public mcIntegrator_t
 {
@@ -128,6 +194,7 @@ public:
 	virtual bool preprocess();
 	virtual colorA_t integrate(renderState_t &state, diffRay_t &ray) const;
 	static integrator_t* factory(paraMap_t &params, renderEnvironment_t &render);
+	icTree_t *irrCache;
 };
 
 directIC_t::directIC_t(bool transpShad, int shadowDepth, int rayDepth)
@@ -178,6 +245,10 @@ bool directIC_t::preprocess()
 	settings = set.str();
 
 	//((qtFilm_t *)imageFilm)->drawTriangle(10, 10, 3);
+
+	// setup cache tree
+	irrCache = new icTree_t(scene->getSceneBound());
+
 	return success;
 }
 
@@ -188,7 +259,7 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 	void *o_udat = state.userdata;
 	bool oldIncludeLights = state.includeLights;
 
-	icRec_t icRecord(5);
+	icRec_t icRecord(5, 5.f); // kappa of 5.0 is temporal, I don't know if this is a good value (1/a = 1/0.20)
 	// Shoot ray into scene
 	if(scene->intersect(ray, icRecord)) // If it hits
 	{
@@ -212,19 +283,22 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 			col += estimateCausticPhotons(state, icRecord, wo);
 			if(useAmbientOcclusion) col += sampleAmbientOcclusion(state, icRecord, wo);
 
+
 			ray_t sRay; // ray from hitpoint to hemisphere sample direction
 			sRay.from = icRecord.P;
 			surfacePoint_t sp; // surface point hit after 1 bounce
 			vector3d_t swi; // incoming radiance direction, useless for lambertian diffuse component
 			vector3d_t swo;
-			for (int j=0; j<icRecord.stratHemi.M; j++) {
-				for (int k=0; k<icRecord.stratHemi.N; k++) {
+			for (int j=0; j<icRecord.getM(); j++) {
+				for (int k=0; k<icRecord.getN(); k++) {
 					// sample ray setup
-					sRay.tmin = 0.0005;
+					sRay.tmin = MIN_RAYDIST;
 					sRay.tmax = -1.0;
 					sRay.dir = icRecord.getSampleHemisphere(j, k, wo);
 					// Calculate each incoming radiance of hemisphere at point icRecord
 					if (scene->intersect(sRay, sp)) {
+						// we calculate min radius with new value
+						icRecord.changeRadius(sRay.tmax);
 						BSDF_t matBSDFs = sp.material->getFlags();
 						sp.material->initBSDF(state, sp, matBSDFs);
 						swo = -sRay.dir;
@@ -239,7 +313,7 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 					}
 				}
 			}
-			icRecord.irr = icRecord.irr / (icRecord.stratHemi.M * icRecord.stratHemi.N);
+			icRecord.irr = icRecord.irr / (icRecord.getM() * icRecord.getN());
 			col += icRecord.irr;
 		}
 
