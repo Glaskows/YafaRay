@@ -131,8 +131,10 @@ void icRec_t::changeRadius(float newr) {
 
 float icRec_t::getWeight(const surfacePoint_t &sp) const {
 	float epPos = 2 * (P - sp.P).length() * invRadius;
-	float epNor = fSqrt(1 - N * sp.N) * NORMALIZATION_TERM; // TODO: needs FACE_FORWARD restriction?
-	return 1 - kappa * fmax(epPos, epNor);
+	float epNor = fSqrt(1 - (N * FACE_FORWARD(sp.Ng, sp.N, P - sp.P)) ) * NORMALIZATION_TERM; // TODO: needs FACE_FORWARD restriction?
+	//float epNor = fSqrt(1 - (N * sp.Ng) ) * NORMALIZATION_TERM; // TODO: needs FACE_FORWARD restriction?
+	float weight = 1 - kappa * fmax(epPos, epNor);
+	return fmax(0.f, weight);
 }
 
 bound_t icRec_t::getBound() const {
@@ -155,19 +157,19 @@ struct icTree_t : public octree_t<icRec_t>
 	//bool isNear(surfacePoint_t &p);
 	void setBound(const bound_t &bound) { treeBound = bound; }
 	struct icLookup_t {
-		icLookup_t(const surfacePoint_t &sp): sp(sp) {}
+		icLookup_t(const surfacePoint_t &sp): sp(sp),totalWeight(0.f) {}
+		bool operator()(const point3d_t &p, const icRec_t &);
 		std::vector<color_t> radSamples;
 		const surfacePoint_t sp;
-		bool operator()(const point3d_t &p, const icRec_t &);
 		float totalWeight;
 	};
 };
 
 bool icTree_t::icLookup_t::operator()(const point3d_t &p, const icRec_t &sample) {
 	float weight = sample.getWeight(sp);
-	if (weight > 0.f) { // TODO: see if weight > 0 is correct or should be a small number
+	if (weight > 0.01f) { // TODO: see if weight > 0 is correct or should be a small number
 		// get weighted irradiance sample = E_i(p) * w_i(p)
-		radSamples.push_back( sample.irr * (weight / (sample.getM() * sample.getN()) ) ); // TODO: optimize division?
+		radSamples.push_back( sample.irr * weight );
 		totalWeight += weight;
 	}
 	return true; // when could it be false? example?
@@ -283,37 +285,40 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 			col += estimateCausticPhotons(state, icRecord, wo);
 			if(useAmbientOcclusion) col += sampleAmbientOcclusion(state, icRecord, wo);
 
-
-			ray_t sRay; // ray from hitpoint to hemisphere sample direction
-			sRay.from = icRecord.P;
-			surfacePoint_t sp; // surface point hit after 1 bounce
-			vector3d_t swi; // incoming radiance direction, useless for lambertian diffuse component
-			vector3d_t swo;
-			for (int j=0; j<icRecord.getM(); j++) {
-				for (int k=0; k<icRecord.getN(); k++) {
-					// sample ray setup
-					sRay.tmin = MIN_RAYDIST;
-					sRay.tmax = -1.0;
-					sRay.dir = icRecord.getSampleHemisphere(j, k, wo);
-					// Calculate each incoming radiance of hemisphere at point icRecord
-					if (scene->intersect(sRay, sp)) {
-						// we calculate min radius with new value
-						icRecord.changeRadius(sRay.tmax);
-						BSDF_t matBSDFs = sp.material->getFlags();
-						sp.material->initBSDF(state, sp, matBSDFs);
-						swo = -sRay.dir;
-						if (! (matBSDFs & BSDF_EMIT) ) {
-							if (matBSDFs & (BSDF_DIFFUSE | BSDF_GLOSSY)) {
-								icRecord.irr += (estimateAllDirectLight(state, sp, swo) *
-												icRecord.material->eval(state, icRecord, swo, swi, BSDF_DIFFUSE));
+			// check for an interpolated result
+			if (!irrCache->getIrradiance(icRecord, icRecord.irr)) { // TODO: change it to receive only icRecord (decoupling)
+				ray_t sRay; // ray from hitpoint to hemisphere sample direction
+				sRay.from = icRecord.P;
+				surfacePoint_t sp; // surface point hit after 1 bounce
+				vector3d_t swi; // incoming radiance direction, useless for lambertian diffuse component
+				vector3d_t swo;
+				for (int j=0; j<icRecord.getM(); j++) {
+					for (int k=0; k<icRecord.getN(); k++) {
+						// sample ray setup
+						sRay.tmin = MIN_RAYDIST;
+						sRay.tmax = -1.0;
+						sRay.dir = icRecord.getSampleHemisphere(j, k, wo);
+						// Calculate each incoming radiance of hemisphere at point icRecord
+						if (scene->intersect(sRay, sp)) {
+							// we calculate min radius with new value
+							icRecord.changeRadius(sRay.tmax);
+							BSDF_t matBSDFs = sp.material->getFlags();
+							sp.material->initBSDF(state, sp, matBSDFs);
+							swo = -sRay.dir;
+							if (! (matBSDFs & BSDF_EMIT) ) {
+								if (matBSDFs & (BSDF_DIFFUSE | BSDF_GLOSSY)) {
+									icRecord.irr += (estimateAllDirectLight(state, sp, swo) *
+													 icRecord.material->eval(state, icRecord, swo, swi, BSDF_DIFFUSE));
+								}
 							}
+						} else {
+							if (background) icRecord.irr += (*background)(sRay, state, false);
 						}
-					} else {
-						if (background) icRecord.irr += (*background)(sRay, state, false);
 					}
 				}
+				icRecord.irr = icRecord.irr / (icRecord.getM() * icRecord.getN());
+				irrCache->add(icRecord);
 			}
-			icRecord.irr = icRecord.irr / (icRecord.getM() * icRecord.getN());
 			col += icRecord.irr;
 		}
 
