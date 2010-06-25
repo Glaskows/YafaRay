@@ -67,27 +67,32 @@ vector3d_t stratifiedHemisphere::getSample(int j, int k) {
 //! Record of Irradiance Cache (1 bounce and direct lighting)
 struct icRec_t : surfacePoint_t
 {
-	icRec_t(int m, float kappa):stratHemi(m),kappa(kappa) { radius = std::numeric_limits<float>::max(); }//!< number of total sections are nSamples = pi*m^2
+	icRec_t(int m, float kappa):stratHemi(m),kappa(kappa) { sampleRadius = std::numeric_limits<float>::max(); }//!< number of total sections are nSamples = pi*m^2
 	/*color_t		estimateIrradiance(scene_t scene, color_t *li); //!< calculate the irradiance by averaging all the incoming radiance*/
 	float			w; //!< weight of the sample
 	color_t			irr; //!< cached irradiance
 	vector3d_t		getSampleHemisphere(int j, int k, const vector3d_t &wo); //!< compute indirect light with direct lighting of first bounce
 	float			getWeight(const surfacePoint_t &p) const;
-	float			getRadius() const { return radius; }
-	float			getInvRadius() const { return invRadius; }
+	float			getRadius() const; //{ return radius; } //!< return the radius of the sample "action" area
+	float			getInvRadius() const { return invRadius; } //!< return 1.f/radius
 	bound_t			getBound() const; //!< get the bounding box of the sample sphere
-	void			changeRadius(float newr); //!< change radius if it needs too given the new one
 	int				getM() const { return stratHemi.M; } //!< return the number of division if hemisphere along theta
 	int				getN() const { return stratHemi.N; } //!< return the number of division if hemisphere along phi
+	void			changeSampleRadius(float newr); //!< change radius if it is a new minimum
+	void			setPixelArea(const diffRay_t &dir); //!< calculates the projected pixel area on the surface position of the sample
 	// ToDo: add rotation and translation gradients
 	// ToDo: add distance to surfaces, minimum and maximum spacing threshold (for neighbor clamping)
 	// ToDo: adaptative sampling
 	static const float NORMALIZATION_TERM = 8.113140441; //!< from T&L weight function normalization term 1/sqrt(1-cos10°) for 10°
 private:
 	stratifiedHemisphere stratHemi; //!< sampling hemisphere at point location
+	float			pArea; //!< projected pixel area over the sample
 	float			kappa; //!< overall changing accuaracy constant
-	float			radius; //!< should be proportional to w
+	float			sampleRadius; //!< minimum distance of all rays from hemisphere sampling
+	float			radius; //!< radius of the sample, based on sample raidius, projected pixel area, gradients, etc...
 	float			invRadius; //!< inverse of radius
+	float			minProjR; //!< min radius based on screen space (1-3 times projected pixel area)
+	float			maxProjR; //!< max radius based on screen space (20 times projected pixel area)
 };
 
 /*color_t icRec_t::estimateIrradiance(color_t *li) {
@@ -121,29 +126,43 @@ vector3d_t icRec_t::getSampleHemisphere(int j, int k, const vector3d_t &wo) {
 	return dir;
 }
 
-void icRec_t::changeRadius(float newr) {
+void icRec_t::changeSampleRadius(float newr) {
 	// we use minimal distance radius (without clamping for now)
-	if (newr < radius) {
-		radius = newr;
-		invRadius = 1.f / radius;
+	if (newr < sampleRadius) {
+		sampleRadius = newr;
+		invRadius = 1.f / sampleRadius;
 	}
 }
 
+float icRec_t::getRadius() const {
+	//return sampleRadius;
+	return std::min(std::max(sampleRadius, minProjR), maxProjR);
+}
+
 float icRec_t::getWeight(const surfacePoint_t &sp) const {
-	float epPos = 2 * (P - sp.P).length() * invRadius;
-	float epNor = fSqrt(1 - (N * FACE_FORWARD(sp.Ng, sp.N, P - sp.P)) ) * NORMALIZATION_TERM; // TODO: needs FACE_FORWARD restriction?
-	//float epNor = fSqrt(1 - (N * sp.Ng) ) * NORMALIZATION_TERM; // TODO: needs FACE_FORWARD restriction?
-	float weight = 1 - kappa * fmax(epPos, epNor);
-	return fmax(0.f, weight);
+	float epPos = (P - sp.P).length() * 2.f / getRadius();
+	//float epNor = fSqrt(1 - (N * FACE_FORWARD(sp.Ng, sp.N, P - sp.P)) ) * NORMALIZATION_TERM; // TODO: needs FACE_FORWARD restriction?
+	float epNor = fSqrt(1.f - (N * sp.Ng) ) * NORMALIZATION_TERM; // TODO: needs FACE_FORWARD restriction?
+	float weight = 1.f - kappa * fmax(epPos, epNor);
+	return weight;
 }
 
 bound_t icRec_t::getBound() const {
+	float radius = getRadius();
 	return bound_t(P - radius, P + radius);
+}
+
+void icRec_t::setPixelArea(const diffRay_t &ray) {
+	spDifferentials_t diff(*this, ray);
+	pArea = fSqrt(diff.projectedPixelArea());
+	minProjR = 3.f * pArea;
+	maxProjR = 20.f * pArea;
+	//Y_INFO<< pArea << " "<< minProjR << " "<< maxProjR << std::endl;
 }
 
 struct icTree_t : public octree_t<icRec_t>
 {
-	icTree_t(const bound_t &bound):octree_t<icRec_t>(bound) {}
+	icTree_t(const bound_t &bound):octree_t<icRec_t>(bound, 20) {}
 	//! Get irradiance estimation at point p. Return false if there isn't a cached irradiance sample near.
 	bool getIrradiance(const surfacePoint_t &p, color_t &irr);
 	//! Add a new cached irradiance sample
@@ -155,12 +174,11 @@ struct icTree_t : public octree_t<icRec_t>
 		lock.unlock();
 	}
 	//bool isNear(surfacePoint_t &p);
-	void setBound(const bound_t &bound) { treeBound = bound; }
 	struct icLookup_t {
 		icLookup_t(const surfacePoint_t &sp): sp(sp),totalWeight(0.f) {}
 		bool operator()(const point3d_t &p, const icRec_t &);
 		std::vector<color_t> radSamples;
-		const surfacePoint_t sp;
+		const surfacePoint_t &sp;
 		float totalWeight;
 	};
 };
@@ -179,13 +197,17 @@ bool icTree_t::getIrradiance(const surfacePoint_t &sp, color_t &wIrr) {
 	icLookup_t lookupProc(sp);
 	lookup(sp.P, lookupProc); // ads weighted radiance values to vector
 	// if there is no good irradiance sample return false
-	if (lookupProc.radSamples.size() == 0)
+	if (lookupProc.radSamples.size() == 0) {
+		//Y_INFO<<"Sin samples-"<<std::endl;
 		return false;
+	}
 	// calculate Sum(E_i(p) * w_i(p))
 	for (unsigned int i=0; i<lookupProc.radSamples.size(); i++) {
 		wIrr += lookupProc.radSamples[i];
 	}
+	//Y_INFO<<"Total weight: "<<lookupProc.totalWeight<<std::endl;
 	wIrr = wIrr / lookupProc.totalWeight; // E(p) = Sum(E_i(p) * w_i(p)) / Sum(w_i(p))
+	//Y_INFO << "Weight: " << wIrr << std::endl;
 	return true;
 }
 
@@ -286,40 +308,44 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 			if(useAmbientOcclusion) col += sampleAmbientOcclusion(state, icRecord, wo);
 
 			// check for an interpolated result
-			if (!irrCache->getIrradiance(icRecord, icRecord.irr)) { // TODO: change it to receive only icRecord (decoupling)
-				ray_t sRay; // ray from hitpoint to hemisphere sample direction
-				sRay.from = icRecord.P;
-				surfacePoint_t sp; // surface point hit after 1 bounce
-				vector3d_t swi; // incoming radiance direction, useless for lambertian diffuse component
-				vector3d_t swo;
-				for (int j=0; j<icRecord.getM(); j++) {
-					for (int k=0; k<icRecord.getN(); k++) {
-						// sample ray setup
-						sRay.tmin = MIN_RAYDIST;
-						sRay.tmax = -1.0;
-						sRay.dir = icRecord.getSampleHemisphere(j, k, wo);
-						// Calculate each incoming radiance of hemisphere at point icRecord
-						if (scene->intersect(sRay, sp)) {
-							// we calculate min radius with new value
-							icRecord.changeRadius(sRay.tmax);
-							BSDF_t matBSDFs = sp.material->getFlags();
-							sp.material->initBSDF(state, sp, matBSDFs);
-							swo = -sRay.dir;
-							if (! (matBSDFs & BSDF_EMIT) ) {
-								if (matBSDFs & (BSDF_DIFFUSE | BSDF_GLOSSY)) {
-									icRecord.irr += (estimateAllDirectLight(state, sp, swo) *
-													 icRecord.material->eval(state, icRecord, swo, swi, BSDF_DIFFUSE));
+			if (ray.hasDifferentials) {
+				icRecord.setPixelArea(ray);
+				if (!irrCache->getIrradiance(icRecord, icRecord.irr)) { // TODO: change it to receive only icRecord (decoupling)
+					// we set the projected pixel area on the surface point
+					ray_t sRay; // ray from hitpoint to hemisphere sample direction
+					sRay.from = icRecord.P;
+					surfacePoint_t sp; // surface point hit after 1 bounce
+					vector3d_t swi; // incoming radiance direction, useless for lambertian diffuse component
+					vector3d_t swo;
+					for (int j=0; j<icRecord.getM(); j++) {
+						for (int k=0; k<icRecord.getN(); k++) {
+							// sample ray setup
+							sRay.tmin = MIN_RAYDIST;
+							sRay.tmax = -1.0;
+							sRay.dir = icRecord.getSampleHemisphere(j, k, wo);
+							// Calculate each incoming radiance of hemisphere at point icRecord
+							if (scene->intersect(sRay, sp)) {
+								// we calculate min radius with new value
+								icRecord.changeSampleRadius(sRay.tmax);
+								BSDF_t matBSDFs = sp.material->getFlags();
+								sp.material->initBSDF(state, sp, matBSDFs);
+								swo = -sRay.dir;
+								if (! (matBSDFs & BSDF_EMIT) ) {
+									if (matBSDFs & (BSDF_DIFFUSE | BSDF_GLOSSY)) {
+										icRecord.irr += (estimateAllDirectLight(state, sp, swo) *
+														 icRecord.material->eval(state, icRecord, swo, swi, BSDF_DIFFUSE));
+									}
 								}
+							} else {
+								if (background) icRecord.irr += (*background)(sRay, state, false);
 							}
-						} else {
-							if (background) icRecord.irr += (*background)(sRay, state, false);
 						}
 					}
+					icRecord.irr = icRecord.irr / (icRecord.getM() * icRecord.getN());
+					irrCache->add(icRecord);
 				}
-				icRecord.irr = icRecord.irr / (icRecord.getM() * icRecord.getN());
-				irrCache->add(icRecord);
+				col += icRecord.irr;
 			}
-			col += icRecord.irr;
 		}
 
 		// Reflective?, Refractive?
