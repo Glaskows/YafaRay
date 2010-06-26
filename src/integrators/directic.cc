@@ -185,7 +185,7 @@ struct icTree_t : public octree_t<icRec_t>
 
 bool icTree_t::icLookup_t::operator()(const point3d_t &p, const icRec_t &sample) {
 	float weight = sample.getWeight(sp);
-	if (weight > 0.01f) { // TODO: see if weight > 0 is correct or should be a small number
+	if (weight > 0.05f) { // TODO: see if weight > 0 is correct or should be a small number
 		// get weighted irradiance sample = E_i(p) * w_i(p)
 		radSamples.push_back( sample.irr * weight );
 		totalWeight += weight;
@@ -283,7 +283,7 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 	void *o_udat = state.userdata;
 	bool oldIncludeLights = state.includeLights;
 
-	icRec_t icRecord(5, 5.f); // kappa of 5.0 is temporal, I don't know if this is a good value (1/a = 1/0.20)
+	icRec_t icRecord(5, 1.f); // kappa of 5.0 is temporal, I don't know if this is a good value
 	// Shoot ray into scene
 	if(scene->intersect(ray, icRecord)) // If it hits
 	{
@@ -332,8 +332,8 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 								swo = -sRay.dir;
 								if (! (matBSDFs & BSDF_EMIT) ) {
 									if (matBSDFs & (BSDF_DIFFUSE | BSDF_GLOSSY)) {
-										icRecord.irr += (estimateAllDirectLight(state, sp, swo) *
-														 icRecord.material->eval(state, icRecord, swo, swi, BSDF_DIFFUSE));
+										icRecord.irr += (estimateAllDirectLight(state, sp, swo));
+													//* icRecord.material->eval(state, icRecord, swo, swi, BSDF_DIFFUSE));
 									}
 								}
 							} else {
@@ -344,7 +344,8 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 					icRecord.irr = icRecord.irr / (icRecord.getM() * icRecord.getN());
 					irrCache->add(icRecord);
 				}
-				col += icRecord.irr;
+				vector3d_t vec;
+				col += icRecord.irr * icRecord.material->eval(state, icRecord, vec, vec, BSDF_DIFFUSE);
 			}
 		}
 
