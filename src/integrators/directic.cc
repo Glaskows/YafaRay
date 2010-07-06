@@ -25,193 +25,13 @@
 #include <core_api/mcintegrator.h>
 #include <core_api/background.h>
 #include <core_api/light.h>
-#include <core_api/vector3d.h>
-#include <core_api/bound.h>
-#include <yafraycore/octree.h>
-#include <utilities/mathOptimizations.h>
-#include <utilities/mcqmc.h>
-
-#include <limits>
-
-#include <ctime>
-
-//#include <core_api/qtfilm.h>
-
 #include <sstream>
+
+#include <yafraycore/irradianceCache.h>
 
 __BEGIN_YAFRAY
 
-//! Stratified hemisphere for getting random direction vectors distributed proportionally to the cosine term.
-struct stratifiedHemisphere {
-	stratifiedHemisphere(int nm, int nn):M(nm),N(nn) {}
-	stratifiedHemisphere(int nm):M(nm), rnd((unsigned)time(0)) { N = M_PI * M; } //!< we get similar division in both direction with N = pi * M
-	vector3d_t getSample(int j, int k); //!< get random direction sample from section j,k in local coordinate system
-	//int getNumSamples() { return M*N; }
-	int M; //!< number of divisions along theta
-	int N; //!< number of divisions along phi
-	random_t rnd; //!< random number generator. ToDo: change seeds!
-};
-
-vector3d_t stratifiedHemisphere::getSample(int j, int k) {
-	// ToDo: change seeds!
-	double s1 = rnd();
-	double s2 = rnd();
-	float theta = (j+s1)/M;
-	float sinTheta = fSqrt(theta);
-	float phi = M_2PI*(k+s2)/N;
-	return vector3d_t(sinTheta * fCos(phi),
-					  sinTheta * fSin(phi),
-					  fSqrt(1 - theta));
-}
-
-//! Record of Irradiance Cache (1 bounce and direct lighting)
-struct icRec_t : surfacePoint_t
-{
-	icRec_t(int m, float kappa):stratHemi(m),kappa(kappa) { sampleRadius = std::numeric_limits<float>::max(); }//!< number of total sections are nSamples = pi*m^2
-	/*color_t		estimateIrradiance(scene_t scene, color_t *li); //!< calculate the irradiance by averaging all the incoming radiance*/
-	float			w; //!< weight of the sample
-	color_t			irr; //!< cached irradiance
-	vector3d_t		getSampleHemisphere(int j, int k, const vector3d_t &wo); //!< compute indirect light with direct lighting of first bounce
-	float			getWeight(const surfacePoint_t &p) const;
-	float			getRadius() const; //{ return radius; } //!< return the radius of the sample "action" area
-	float			getInvRadius() const { return invRadius; } //!< return 1.f/radius
-	bound_t			getBound() const; //!< get the bounding box of the sample sphere
-	int				getM() const { return stratHemi.M; } //!< return the number of division if hemisphere along theta
-	int				getN() const { return stratHemi.N; } //!< return the number of division if hemisphere along phi
-	void			changeSampleRadius(float newr); //!< change radius if it is a new minimum
-	void			setPixelArea(const diffRay_t &dir); //!< calculates the projected pixel area on the surface position of the sample
-	// ToDo: add rotation and translation gradients
-	// ToDo: add distance to surfaces, minimum and maximum spacing threshold (for neighbor clamping)
-	// ToDo: adaptative sampling
-	static const float NORMALIZATION_TERM = 8.113140441; //!< from T&L weight function normalization term 1/sqrt(1-cos10°) for 10°
-private:
-	stratifiedHemisphere stratHemi; //!< sampling hemisphere at point location
-	float			pArea; //!< projected pixel area over the sample
-	float			kappa; //!< overall changing accuaracy constant
-	float			sampleRadius; //!< minimum distance of all rays from hemisphere sampling
-	float			radius; //!< radius of the sample, based on sample raidius, projected pixel area, gradients, etc...
-	float			invRadius; //!< inverse of radius
-	float			minProjR; //!< min radius based on screen space (1-3 times projected pixel area)
-	float			maxProjR; //!< max radius based on screen space (20 times projected pixel area)
-};
-
-/*color_t icRec_t::estimateIrradiance(color_t *li) {
-	color_t result;
-	int totalSamples = stratHemi.getNumSamples();
-	for (int i=0; i<totalSamples; i++) {
-		result += li[i];
-	}
-	result = result / totalSamples;
-	return result;
-}*/
-
-vector3d_t icRec_t::getSampleHemisphere(int j, int k, const vector3d_t &wo) {
-	vector3d_t dir; // temporal object to avoid innecesary frequent object creation
-	//irr.black();
-	//surfacePoint_t hitSp;
-	//for (int j=0; j<stratHemi.M; j++) {
-	//	for (int k=0; k<stratHemi.N; k++) {
-			// get stratified sample
-			dir = stratHemi.getSample(j, k);
-			vector3d_t norm = FACE_FORWARD(Ng, N, wo);
-			dir = NU*dir.x + NV*dir.y + norm*dir.z;
-			// obtain sample outgoing radiance in sample direction
-	//		diffRay_t lRay(sp.P, dir, MIN_RAYDIST);
-	//		if (scene.intersect(lRay, hitSp)) {
-				// sum radiance to total irradiance
-	//			irr += estimateAllDirectLight(state, hitSp, -lRay.dir);
-	//		}
-	//	}
-	//}
-	return dir;
-}
-
-void icRec_t::changeSampleRadius(float newr) {
-	// we use minimal distance radius (without clamping for now)
-	if (newr < sampleRadius) {
-		sampleRadius = newr;
-		invRadius = 1.f / sampleRadius;
-	}
-}
-
-float icRec_t::getRadius() const {
-	//return sampleRadius;
-	return std::min(std::max(sampleRadius, minProjR), maxProjR);
-}
-
-float icRec_t::getWeight(const surfacePoint_t &sp) const {
-	float epPos = (P - sp.P).length() * 2.f / getRadius();
-	//float epNor = fSqrt(1 - (N * FACE_FORWARD(sp.Ng, sp.N, P - sp.P)) ) * NORMALIZATION_TERM; // TODO: needs FACE_FORWARD restriction?
-	float epNor = fSqrt(1.f - (N * sp.Ng) ) * NORMALIZATION_TERM; // TODO: needs FACE_FORWARD restriction?
-	float weight = 1.f - kappa * fmax(epPos, epNor);
-	return weight;
-}
-
-bound_t icRec_t::getBound() const {
-	float radius = getRadius();
-	return bound_t(P - radius, P + radius);
-}
-
-void icRec_t::setPixelArea(const diffRay_t &ray) {
-	spDifferentials_t diff(*this, ray);
-	pArea = fSqrt(diff.projectedPixelArea());
-	minProjR = 3.f * pArea;
-	maxProjR = 20.f * pArea;
-	//Y_INFO<< pArea << " "<< minProjR << " "<< maxProjR << std::endl;
-}
-
-struct icTree_t : public octree_t<icRec_t>
-{
-	icTree_t(const bound_t &bound):octree_t<icRec_t>(bound, 20) {}
-	//! Get irradiance estimation at point p. Return false if there isn't a cached irradiance sample near.
-	bool getIrradiance(const surfacePoint_t &p, color_t &irr);
-	//! Add a new cached irradiance sample
-	void add(const icRec_t &rec)
-	{
-		lock.writeLock();
-		recursiveAdd(&root, treeBound, rec, rec.getBound(),
-					 2*rec.getRadius()*M_SQRT3 ); // 2*r*sqrt(3) = (bound.a - bound.g).length
-		lock.unlock();
-	}
-	//bool isNear(surfacePoint_t &p);
-	struct icLookup_t {
-		icLookup_t(const surfacePoint_t &sp): sp(sp),totalWeight(0.f) {}
-		bool operator()(const point3d_t &p, const icRec_t &);
-		std::vector<color_t> radSamples;
-		const surfacePoint_t &sp;
-		float totalWeight;
-	};
-};
-
-bool icTree_t::icLookup_t::operator()(const point3d_t &p, const icRec_t &sample) {
-	float weight = sample.getWeight(sp);
-	if (weight > 0.05f) { // TODO: see if weight > 0 is correct or should be a small number
-		// get weighted irradiance sample = E_i(p) * w_i(p)
-		radSamples.push_back( sample.irr * weight );
-		totalWeight += weight;
-	}
-	return true; // when could it be false? example?
-}
-
-bool icTree_t::getIrradiance(const surfacePoint_t &sp, color_t &wIrr) {
-	icLookup_t lookupProc(sp);
-	lookup(sp.P, lookupProc); // ads weighted radiance values to vector
-	// if there is no good irradiance sample return false
-	if (lookupProc.radSamples.size() == 0) {
-		//Y_INFO<<"Sin samples-"<<std::endl;
-		return false;
-	}
-	// calculate Sum(E_i(p) * w_i(p))
-	for (unsigned int i=0; i<lookupProc.radSamples.size(); i++) {
-		wIrr += lookupProc.radSamples[i];
-	}
-	//Y_INFO<<"Total weight: "<<lookupProc.totalWeight<<std::endl;
-	wIrr = wIrr / lookupProc.totalWeight; // E(p) = Sum(E_i(p) * w_i(p)) / Sum(w_i(p))
-	//Y_INFO << "Weight: " << wIrr << std::endl;
-	return true;
-}
-
-class YAFRAYPLUGIN_EXPORT directIC_t: public mcIntegrator_t
+class YAFRAYPLUGIN_EXPORT directIC_t : public mcIntegrator_t
 {
 public:
 	directIC_t(bool transpShad=false, int shadowDepth=4, int rayDepth=6);
@@ -282,9 +102,13 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 	float alpha = 0.0;
 	void *o_udat = state.userdata;
 	bool oldIncludeLights = state.includeLights;
-
-	icRec_t icRecord(5, 1.f); // kappa of 5.0 is temporal, I don't know if this is a good value
+	icRec_t icRecord(5, 1.f); // M = 5. Kappa = 3
+	//Y_INFO << "COMIENZO INTEGRATE \n Rotgrad(1) = " << icRecord.rotGrad[0] << "\n";
+	//Y_INFO << "Rotgrad(2) = " << icRecord.rotGrad[1] << "\n";
+	//Y_INFO << "Rotgrad(3) = " << icRecord.rotGrad[2] << "\n";
 	// Shoot ray into scene
+	float oldRayLength[icRecord.getM()];
+	color_t oldRad[icRecord.getM()];
 	if(scene->intersect(ray, icRecord)) // If it hits
 	{
 		// create new memory on stack for material setup
@@ -295,6 +119,8 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 		material->initBSDF(state, icRecord, bsdfs);
 
 		vector3d_t wo = -ray.dir;
+		icRecord.setNup(wo);
+
 		if(state.raylevel == 0) state.includeLights = true;
 
 		// obtain material self emitance
@@ -310,45 +136,125 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 			// check for an interpolated result
 			if (ray.hasDifferentials) {
 				icRecord.setPixelArea(ray);
-				if (!irrCache->getIrradiance(icRecord, icRecord.irr)) { // TODO: change it to receive only icRecord (decoupling)
+				if (!irrCache->getIrradiance(icRecord)) {
 					// we set the projected pixel area on the surface point
 					ray_t sRay; // ray from hitpoint to hemisphere sample direction
 					sRay.from = icRecord.P;
 					surfacePoint_t sp; // surface point hit after 1 bounce
-					vector3d_t swi; // incoming radiance direction, useless for lambertian diffuse component
+					//vector3d_t swi; // incoming radiance direction, useless for lambertian diffuse component
 					vector3d_t swo;
-					for (int j=0; j<icRecord.getM(); j++) {
-						for (int k=0; k<icRecord.getN(); k++) {
+					color_t innerRotValues;
+					color_t innerTransValuesU;
+					color_t innerTransValuesV;
+					color_t radiance;
+					for (int k=0; k<icRecord.getN(); k++) {
+						//Y_INFO << "K = " << k << "********************"<< std::endl;
+						innerRotValues.black();
+						innerTransValuesU.black();
+						innerTransValuesV.black();
+						for (int j=0; j<icRecord.getM(); j++) {
+							//Y_INFO << "J = " << j << "-------------------"<< std::endl;
+							radiance.black();
 							// sample ray setup
 							sRay.tmin = MIN_RAYDIST;
 							sRay.tmax = -1.0;
-							sRay.dir = icRecord.getSampleHemisphere(j, k, wo);
+							sRay.dir = icRecord.getSampleHemisphere(j, k);
 							// Calculate each incoming radiance of hemisphere at point icRecord
 							if (scene->intersect(sRay, sp)) {
 								// we calculate min radius with new value
 								icRecord.changeSampleRadius(sRay.tmax);
-								BSDF_t matBSDFs = sp.material->getFlags();
+
+								BSDF_t matBSDFs;
 								sp.material->initBSDF(state, sp, matBSDFs);
 								swo = -sRay.dir;
 								if (! (matBSDFs & BSDF_EMIT) ) {
-									if (matBSDFs & (BSDF_DIFFUSE | BSDF_GLOSSY)) {
-										icRecord.irr += (estimateAllDirectLight(state, sp, swo));
-													//* icRecord.material->eval(state, icRecord, swo, swi, BSDF_DIFFUSE));
+									if (matBSDFs & (BSDF_DIFFUSE /*| BSDF_GLOSSY*/)) {
+										// Totally diffusive! not taking into account any glossyness
+										radiance = estimateAllDirectLight(state, sp, swo);
+										icRecord.irr += radiance;
 									}
 								}
 							} else {
-								if (background) icRecord.irr += (*background)(sRay, state, false);
+								if (background) {
+									radiance = (*background)(sRay, state, false);
+									icRecord.irr += radiance;
+								}
 							}
+							// note: oldRad[j] and oldRayLength[j] means L_j,k-1 and r_j,k-1 respectively
+							//       oldRad[j-1] and oldRayLength[j-1] means L_j-1,k and r_j-1,k respectively
+							if (k>0) {
+								if (j>0) {
+									// cos2(theta_j-)sin(theta_j-) * (L_j,k - L_j-1,k) / min(r_j,k , r_j-1,k)
+									innerTransValuesU +=
+											(icRecord.stratHemi.getCosThetaMinus(j)*icRecord.stratHemi.getCosThetaMinus(j)) /
+											(fmin(sRay.tmax, oldRayLength[j-1])) *
+											(radiance - oldRad[j-1]);
+								}
+								// cos(theta_j)[cos(theta_j-) - cos(theta_j+)] * (L_j,k - L_j,k-1) / [sin(theta_j,k) * min(r_j,k , r_j-1,k)]
+								innerTransValuesV +=
+										icRecord.stratHemi.getCosTheta(j) * (icRecord.stratHemi.getCosThetaMinus(j) - icRecord.stratHemi.getCosThetaPlus(j)) /
+										(icRecord.stratHemi.getSinTheta(j) * fmin(sRay.tmax, oldRayLength[j])) *
+										(radiance - oldRad[j]);
+
+							}
+							// copy new rays and irradiance values over old ones
+							oldRad[j] = radiance;
+							oldRayLength[j] = sRay.tmax; // ToDo: check that ray length when no intercept is big
+							innerRotValues -= icRecord.stratHemi.getTanTheta(j) * radiance;
+							//Y_INFO << "Tan(theta): " << icRecord.stratHemi.getTanTheta(j) << " - Radiance: "<< radiance << "\n";
+							//Y_INFO << "innerRotValues: " << innerRotValues << std::endl;
 						}
+						icRecord.rotGrad[0] += icRecord.stratHemi.getVk(k) * innerRotValues.R;
+						icRecord.rotGrad[1] += icRecord.stratHemi.getVk(k) * innerRotValues.G;
+						icRecord.rotGrad[2] += icRecord.stratHemi.getVk(k) * innerRotValues.B;
+
+						icRecord.transGrad[0] +=
+								( (innerTransValuesU.R * M_2PI / (float)icRecord.getN() ) *
+								  icRecord.stratHemi.getUk(k) ) +
+								( innerTransValuesV.R *
+								  icRecord.stratHemi.getVkMinus(k) );
+						icRecord.transGrad[1] +=
+								( (innerTransValuesU.G * M_2PI / (float)icRecord.getN() ) *
+								  icRecord.stratHemi.getUk(k) ) +
+								( innerTransValuesV.G *
+								  icRecord.stratHemi.getVkMinus(k) );
+						icRecord.transGrad[2] +=
+								( (innerTransValuesU.B * M_2PI / (float)icRecord.getN() ) *
+								  icRecord.stratHemi.getUk(k) ) +
+								( innerTransValuesV.B *
+								  icRecord.stratHemi.getVkMinus(k) );
+						//Y_INFO << "V(k) = " << icRecord.stratHemi.getVk(k) << std::endl;
+						//Y_INFO << "Rotgrad(1) = " << icRecord.rotGrad[0] << "\n";
+						//Y_INFO << "Rotgrad(2) = " << icRecord.rotGrad[1] << "\n";
+						//Y_INFO << "Rotgrad(3) = " << icRecord.rotGrad[2] << "\n";
 					}
-					icRecord.irr = icRecord.irr / (icRecord.getM() * icRecord.getN());
+					float k = M_PI / ((float)icRecord.getM() * (float)icRecord.getN());
+					icRecord.irr = icRecord.irr * k;
+					//Y_INFO << "k: " << k << " - icRecord.irr: " << icRecord.irr << std::endl;
+					//Y_INFO << "NU: "<< icRecord.NU <<  "NV: " << icRecord.NV << "Nup: " << icRecord.getNup() << std::endl;
+					for (int i=0; i<3; i++) {
+						//Y_INFO << "Rotgrad(" << i << ") = " << icRecord.rotGrad[i] << "\n";
+						icRecord.rotGrad[i] = changeBasis(
+								icRecord.rotGrad[i] * k,
+								icRecord.NU,
+								icRecord.NV,
+								icRecord.getNup());
+						icRecord.transGrad[i] = changeBasis(
+								icRecord.transGrad[i],
+								icRecord.NU,
+								icRecord.NV,
+								icRecord.getNup());
+						//Y_INFO << "Rotgrad(" << i << ") = " << icRecord.rotGrad[i] << "\n";
+						// limit gradient (too big on corners): watch out! circular dependences
+						icRecord.transGrad[i] = icRecord.transGrad[i] * fmin(1.f, icRecord.sampleRadius / icRecord.minProjR);
+					}
 					irrCache->add(icRecord);
 				}
-				vector3d_t vec;
-				col += icRecord.irr * icRecord.material->eval(state, icRecord, vec, vec, BSDF_DIFFUSE);
-			}
+				col += icRecord.irr * icRecord.material->eval(state, icRecord, wo, icRecord.getNup(), BSDF_DIFFUSE) * M_1_PI;
+				//}
+			} else
+				Y_INFO << "NO DIFFERENTIALS!!!" << std::endl;
 		}
-
 		// Reflective?, Refractive?
 		recursiveRaytrace(state, ray, bsdfs, icRecord, wo, col, alpha);
 
@@ -362,6 +268,7 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 
 	state.userdata = o_udat;
 	state.includeLights = oldIncludeLights;
+	//col.clampRGB01();
 	return colorA_t(col, alpha);
 }
 
