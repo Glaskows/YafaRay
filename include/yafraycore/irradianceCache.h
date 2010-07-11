@@ -28,6 +28,7 @@
 #include <core_api/color.h>
 #include <core_api/surface.h>
 #include <core_api/material.h>
+#include <core_api/scene.h>
 #include <yafraycore/octree.h>
 #include <utilities/mathOptimizations.h>
 #include <utilities/mcqmc.h>
@@ -51,7 +52,7 @@ inline vector3d_t changeBasis(const vector3d_t &vec, const vector3d_t &nx, const
   */
 struct stratifiedHemisphere {
 	stratifiedHemisphere(int nm):
-			M(nm), N(M_PI * M), rnd((unsigned)time(0)) {
+			M(nm), N(M_PI * M), rnd((unsigned)1/*time(0)*/) {
 	}
 	// METHODS
 	vector3d_t getDirection(int j, int k); //!< get random direction sample from section j,k in local coordinate system
@@ -75,7 +76,10 @@ struct stratifiedHemisphere {
 //! Record of Irradiance Cache (1 bounce and direct lighting)
 struct icRec_t : public surfacePoint_t
 {
-	icRec_t(int m, float kappa); //!< number of total sections are nSamples = pi*m^2
+	icRec_t(int m, float kappa);
+	/*icRec_t(int m, float kappa,
+			const diffRay_t &ray, const scene_t &scene, const renderState_t &state,
+			const surfacePoint_t &sp);*/
 	// METHODS
 	vector3d_t		getSampleHemisphere(int j, int k); //!< compute indirect light with direct lighting of first bounce
 	float			getWeight(const icRec_t &record) const;
@@ -95,7 +99,9 @@ struct icRec_t : public surfacePoint_t
 	vector3d_t		transGrad[3];
 	stratifiedHemisphere stratHemi; //!< sampling hemisphere at point location
 	float			sampleRadius; //!< minimum distance of all rays from hemisphere sampling
+	float			radius; //!< radius of the sample, based on sample raidius, projected pixel area, gradients, etc...
 	float			minProjR; //!< min radius based on screen space (1-3 times projected pixel area)
+	float			maxProjR; //!< max radius based on screen space (20 times projected pixel area)
 	// ToDo: add rotation and translation gradients
 	// ToDo: add distance to surfaces, minimum and maximum spacing threshold (for neighbor clamping)
 	// ToDo: adaptative sampling
@@ -104,9 +110,9 @@ private:
 	vector3d_t		Nup; //!< normal vector on the side of the hitting ray
 	float			pArea; //!< projected pixel area over the sample
 	float			kappa; //!< overall changing accuaracy constant
-	float			radius; //!< radius of the sample, based on sample raidius, projected pixel area, gradients, etc...
+
 	float			invRadius; //!< inverse of radius
-	float			maxProjR; //!< max radius based on screen space (20 times projected pixel area)
+
 };
 
 

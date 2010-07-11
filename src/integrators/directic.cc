@@ -36,6 +36,7 @@ class YAFRAYPLUGIN_EXPORT directIC_t : public mcIntegrator_t
 public:
 	directIC_t(bool transpShad=false, int shadowDepth=4, int rayDepth=6);
 	virtual bool preprocess();
+	color_t getRadiance(renderState_t &state, ray_t &dir) const;
 	virtual colorA_t integrate(renderState_t &state, diffRay_t &ray) const;
 	static integrator_t* factory(paraMap_t &params, renderEnvironment_t &render);
 	icTree_t *irrCache;
@@ -96,16 +97,42 @@ bool directIC_t::preprocess()
 	return success;
 }
 
+/*! returns the incoming radiance from dir direction
+  */
+// in dir we return the length of hit
+// ray must have from and dir
+color_t directIC_t::getRadiance(renderState_t &state, ray_t &ray) const
+{
+	color_t result;
+	ray.tmin = MIN_RAYDIST;
+	ray.tmax = -1.0;
+	surfacePoint_t hitpoint;
+	if (scene->intersect(ray, hitpoint)) {
+		BSDF_t matBSDF;
+		hitpoint.material->initBSDF(state, hitpoint, matBSDF);
+		vector3d_t wo = -ray.dir;
+		if (! (matBSDF & BSDF_EMIT) ) {
+			if ( matBSDF & (BSDF_DIFFUSE | BSDF_GLOSSY) ) {
+				// Totally diffusive! not taking into account any glossyness
+				result = estimateAllDirectLight(state, hitpoint, wo);
+			}
+		}
+	} else {
+		if (background) {
+			result = (*background)(ray, state, false);
+		}
+		ray.tmax = std::numeric_limits<float>::max();
+	}
+	return result;
+}
+
 colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 {
 	color_t col(0.0);
 	float alpha = 0.0;
 	void *o_udat = state.userdata;
 	bool oldIncludeLights = state.includeLights;
-	icRec_t icRecord(5, 1.f); // M = 5. Kappa = 3
-	//Y_INFO << "COMIENZO INTEGRATE \n Rotgrad(1) = " << icRecord.rotGrad[0] << "\n";
-	//Y_INFO << "Rotgrad(2) = " << icRecord.rotGrad[1] << "\n";
-	//Y_INFO << "Rotgrad(3) = " << icRecord.rotGrad[2] << "\n";
+	icRec_t icRecord(25, 2.5f); // M, Kappa
 	// Shoot ray into scene
 	float oldRayLength[icRecord.getM()];
 	color_t oldRad[icRecord.getM()];
@@ -140,9 +167,7 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 					// we set the projected pixel area on the surface point
 					ray_t sRay; // ray from hitpoint to hemisphere sample direction
 					sRay.from = icRecord.P;
-					surfacePoint_t sp; // surface point hit after 1 bounce
 					//vector3d_t swi; // incoming radiance direction, useless for lambertian diffuse component
-					vector3d_t swo;
 					color_t innerRotValues;
 					color_t innerTransValuesU;
 					color_t innerTransValuesV;
@@ -154,49 +179,28 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 						innerTransValuesV.black();
 						for (int j=0; j<icRecord.getM(); j++) {
 							//Y_INFO << "J = " << j << "-------------------"<< std::endl;
-							radiance.black();
-							// sample ray setup
-							sRay.tmin = MIN_RAYDIST;
-							sRay.tmax = -1.0;
-							sRay.dir = icRecord.getSampleHemisphere(j, k);
 							// Calculate each incoming radiance of hemisphere at point icRecord
-							if (scene->intersect(sRay, sp)) {
-								// we calculate min radius with new value
-								icRecord.changeSampleRadius(sRay.tmax);
-
-								BSDF_t matBSDFs;
-								sp.material->initBSDF(state, sp, matBSDFs);
-								swo = -sRay.dir;
-								if (! (matBSDFs & BSDF_EMIT) ) {
-									if (matBSDFs & (BSDF_DIFFUSE /*| BSDF_GLOSSY*/)) {
-										// Totally diffusive! not taking into account any glossyness
-										radiance = estimateAllDirectLight(state, sp, swo);
-										icRecord.irr += radiance;
-									}
-								}
-							} else {
-								if (background) {
-									radiance = (*background)(sRay, state, false);
-									icRecord.irr += radiance;
-								}
-							}
+							sRay.dir = icRecord.getSampleHemisphere(j, k);
+							radiance = getRadiance(state, sRay);
 							// note: oldRad[j] and oldRayLength[j] means L_j,k-1 and r_j,k-1 respectively
 							//       oldRad[j-1] and oldRayLength[j-1] means L_j-1,k and r_j-1,k respectively
 							if (k>0) {
 								if (j>0) {
-									// cos2(theta_j-)sin(theta_j-) * (L_j,k - L_j-1,k) / min(r_j,k , r_j-1,k)
+								// cos2(theta_j-)sin(theta_j-) * (L_j,k - L_j-1,k) / min(r_j,k , r_j-1,k)
 									innerTransValuesU +=
 											(icRecord.stratHemi.getCosThetaMinus(j)*icRecord.stratHemi.getCosThetaMinus(j)) /
 											(fmin(sRay.tmax, oldRayLength[j-1])) *
 											(radiance - oldRad[j-1]);
-								}
+								//}
 								// cos(theta_j)[cos(theta_j-) - cos(theta_j+)] * (L_j,k - L_j,k-1) / [sin(theta_j,k) * min(r_j,k , r_j-1,k)]
 								innerTransValuesV +=
 										icRecord.stratHemi.getCosTheta(j) * (icRecord.stratHemi.getCosThetaMinus(j) - icRecord.stratHemi.getCosThetaPlus(j)) /
 										(icRecord.stratHemi.getSinTheta(j) * fmin(sRay.tmax, oldRayLength[j])) *
 										(radiance - oldRad[j]);
-
 							}
+							}
+							icRecord.irr += radiance;
+							icRecord.changeSampleRadius(sRay.tmax);
 							// copy new rays and irradiance values over old ones
 							oldRad[j] = radiance;
 							oldRayLength[j] = sRay.tmax; // ToDo: check that ray length when no intercept is big
@@ -246,8 +250,23 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 								icRecord.getNup());
 						//Y_INFO << "Rotgrad(" << i << ") = " << icRecord.rotGrad[i] << "\n";
 						// limit gradient (too big on corners): watch out! circular dependences
-						icRecord.transGrad[i] = icRecord.transGrad[i] * fmin(1.f, icRecord.sampleRadius / icRecord.minProjR);
+						//icRecord.transGrad[i] = icRecord.transGrad[i] * fmin(1.f, icRecord.sampleRadius / icRecord.minProjR);
 					}
+					// HEURISTICS
+					// limit r_i by gradient
+					icRecord.radius = std::min(icRecord.sampleRadius,
+											   std::min(icRecord.irr.R / icRecord.transGrad[0].length(),
+														std::min(icRecord.irr.G / icRecord.transGrad[1].length(),
+																 icRecord.irr.B / icRecord.transGrad[2].length()))
+											   );
+					// clamp r_i
+					icRecord.radius = std::min(std::max(icRecord.radius, icRecord.minProjR), icRecord.maxProjR);
+					// limit gradient
+					for (int i=0; i<3; i++) {
+						icRecord.transGrad[i] =
+								icRecord.transGrad[i] * std::min(1.f, icRecord.sampleRadius / icRecord.minProjR);
+					}
+					// END HEURISTICS
 					irrCache->add(icRecord);
 				}
 				col += icRecord.irr * icRecord.material->eval(state, icRecord, wo, icRecord.getNup(), BSDF_DIFFUSE) * M_1_PI;
@@ -255,6 +274,7 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 			} else
 				Y_INFO << "NO DIFFERENTIALS!!!" << std::endl;
 		}
+
 		// Reflective?, Refractive?
 		recursiveRaytrace(state, ray, bsdfs, icRecord, wo, col, alpha);
 
