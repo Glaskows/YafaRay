@@ -77,9 +77,7 @@ struct stratifiedHemisphere {
 struct icRec_t : public surfacePoint_t
 {
 	icRec_t(int m, float kappa);
-	/*icRec_t(int m, float kappa,
-			const diffRay_t &ray, const scene_t &scene, const renderState_t &state,
-			const surfacePoint_t &sp);*/
+	icRec_t(int m, float kappa, const surfacePoint_t &sp);
 	// METHODS
 	vector3d_t		getSampleHemisphere(int j, int k); //!< compute indirect light with direct lighting of first bounce
 	float			getWeight(const icRec_t &record) const;
@@ -118,7 +116,7 @@ private:
 
 struct icTree_t : public octree_t<icRec_t>
 {
-	icTree_t(const bound_t &bound):octree_t<icRec_t>(bound, 5) {}
+	icTree_t(const bound_t &bound):octree_t<icRec_t>(bound, 15) {}
 	//! Get irradiance estimation at point p. Return false if there isn't a cached irradiance sample near.
 	bool getIrradiance(icRec_t &record);
 	//! Add a new cached irradiance sample

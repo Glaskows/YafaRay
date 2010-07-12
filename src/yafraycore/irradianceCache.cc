@@ -90,89 +90,9 @@ icRec_t::icRec_t(int m, float kappa):stratHemi(m), kappa(kappa) {
 	sampleRadius = std::numeric_limits<float>::max();
 }
 
-/*icRec_t::icRec_t(int m, float kappa,
-				 const diffRay_t &ray, const , const renderState_t &state,
-				 const surfacePoint_t &sp):stratHemi(m), kappa(kappa) {
+icRec_t::icRec_t(int m, float kappa, const surfacePoint_t &sp):surfacePoint_t(sp), stratHemi(m), kappa(kappa) {
 	sampleRadius = std::numeric_limits<float>::max();
-	if (ray.hasDifferentials) {
-		// we set the projected pixel area on the surface point
-		setPixelArea(ray);
-		ray_t sRay; // ray from hitpoint to hemisphere sample direction
-		sRay.from = sp.P;
-		color_t innerRotValues;
-		color_t innerTransValuesU;
-		color_t innerTransValuesV;
-		color_t radiance;
-		float oldRayLength[getM()];
-		color_t oldRad[getM()];
-		for (int k=0; k<getN(); k++) {
-			innerRotValues.black();
-			innerTransValuesU.black();
-			innerTransValuesV.black();
-			for (int j=0; j<getM(); j++) {
-				// Calculate each incoming radiance of hemisphere at point icRecord
-				sRay.dir = getSampleHemisphere(j, k);
-				radiance = getRadiance(state, sRay);
-				// note: oldRad[j] and oldRayLength[j] means L_j,k-1 and r_j,k-1 respectively
-				//       oldRad[j-1] and oldRayLength[j-1] means L_j-1,k and r_j-1,k respectively
-				if (k>0) {
-					if (j>0) {
-						// cos2(theta_j-)sin(theta_j-) * (L_j,k - L_j-1,k) / min(r_j,k , r_j-1,k)
-						innerTransValuesU +=
-								(stratHemi.getCosThetaMinus(j)*stratHemi.getCosThetaMinus(j)) /
-								(fmin(sRay.tmax, oldRayLength[j-1])) *
-								(radiance - oldRad[j-1]);
-						//}
-						// cos(theta_j)[cos(theta_j-) - cos(theta_j+)] * (L_j,k - L_j,k-1) / [sin(theta_j,k) * min(r_j,k , r_j-1,k)]
-						innerTransValuesV +=
-								stratHemi.getCosTheta(j) * (stratHemi.getCosThetaMinus(j) - stratHemi.getCosThetaPlus(j)) /
-								(stratHemi.getSinTheta(j) * fmin(sRay.tmax, oldRayLength[j])) *
-								(radiance - oldRad[j]);
-					}
-				}
-				irr += radiance;
-				changeSampleRadius(sRay.tmax);
-				// copy new rays and irradiance values over old ones
-				oldRad[j] = radiance;
-				oldRayLength[j] = sRay.tmax; // ToDo: check that ray length when no intercept is big
-				innerRotValues -= stratHemi.getTanTheta(j) * radiance;
-			}
-			rotGrad[0] += stratHemi.getVk(k) * innerRotValues.R;
-			rotGrad[1] += stratHemi.getVk(k) * innerRotValues.G;
-			rotGrad[2] += stratHemi.getVk(k) * innerRotValues.B;
-
-			transGrad[0] +=
-					( (innerTransValuesU.R * M_2PI / (float)getN() ) * stratHemi.getUk(k) ) +
-					( innerTransValuesV.R * stratHemi.getVkMinus(k) );
-			transGrad[1] +=
-					( (innerTransValuesU.G * M_2PI / (float)getN() ) * stratHemi.getUk(k) ) +
-					( innerTransValuesV.G * stratHemi.getVkMinus(k) );
-			transGrad[2] +=
-					( (innerTransValuesU.B * M_2PI / (float)getN() ) * stratHemi.getUk(k) ) +
-					( innerTransValuesV.B *	stratHemi.getVkMinus(k) );
-		}
-		float k = M_PI / ((float)getM() * (float)getN());
-		irr *= k;
-		for (int i=0; i<3; i++) {
-			rotGrad[i] = changeBasis( rotGrad[i] * k, NU, NV, Nup );
-			transGrad[i] = changeBasis( transGrad[i], NU, NV, Nup );
-		}
-		// HEURISTICS
-		// limit r_i by gradient
-		radius = std::min(sampleRadius, std::min(irr.R / transGrad[0].length(),
-												 std::min(irr.G / transGrad[1].length(),
-														  irr.B / transGrad[2].length() ) ) );
-		// clamp r_i
-		radius = std::min(std::max(radius, minProjR), maxProjR);
-		// limit gradient
-		for (int i=0; i<3; i++) {
-			transGrad[i] =
-					transGrad[i] * std::min(1.f, sampleRadius / minProjR);
-		}
-		// END HEURISTICS
-	} else
-		Y_INFO << "NO DIFFERENTIALS!!!" << std::endl;
-}*/
+}
 
 vector3d_t icRec_t::getSampleHemisphere(int j, int k) {
 	return changeBasis( stratHemi.getDirection(j, k), NU, NV, Nup );

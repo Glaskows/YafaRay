@@ -626,4 +626,202 @@ color_t mcIntegrator_t::sampleAmbientOcclusion(renderState_t &state, const surfa
 	return col / (float)n;
 }
 
+color_t mcIntegrator_t::getRadiance(renderState_t &state, ray_t &ray) const {
+	color_t color;
+	return color;
+}
+
+icRec_t mcIntegrator_t::createNewICRecord(renderState_t &state, diffRay_t &ray, const surfacePoint_t &sp) const {
+	if (!ray.hasDifferentials)
+		Y_INFO << "ERROR: ray from mcIntegrator_t::createNewICRecord() should have differentials" << std::endl;
+	icRec_t record(5, 3.f, sp);
+	float oldRayLength[record.getM()];
+	color_t oldRad[record.getM()];
+	// we set the projected pixel area on the surface point
+	record.setPixelArea(ray);
+	ray_t sRay; // ray from hitpoint to hemisphere sample direction
+	sRay.from = record.P;
+	color_t innerRotValues;
+	color_t innerTransValuesU;
+	color_t innerTransValuesV;
+	color_t radiance;
+	for (int k=0; k<record.getN(); k++) {
+		innerRotValues.black();
+		innerTransValuesU.black();
+		innerTransValuesV.black();
+		for (int j=0; j<record.getM(); j++) {
+			// Calculate each incoming radiance of hemisphere at point icRecord
+			sRay.dir = record.getSampleHemisphere(j, k);
+			radiance = getRadiance(state, sRay);
+			// note: oldRad[j] and oldRayLength[j] means L_j,k-1 and r_j,k-1 respectively
+			//       oldRad[j-1] and oldRayLength[j-1] means L_j-1,k and r_j-1,k respectively
+			if (k>0) {
+				if (j>0) {
+					// cos2(theta_j-)sin(theta_j-) * (L_j,k - L_j-1,k) / min(r_j,k , r_j-1,k)
+					innerTransValuesU +=
+							(record.stratHemi.getCosThetaMinus(j)*record.stratHemi.getCosThetaMinus(j)) /
+							(fmin(sRay.tmax, oldRayLength[j-1])) *
+							(radiance - oldRad[j-1]);
+					// cos(theta_j)[cos(theta_j-) - cos(theta_j+)] * (L_j,k - L_j,k-1) / [sin(theta_j,k) * min(r_j,k , r_j-1,k)]
+					innerTransValuesV +=
+							record.stratHemi.getCosTheta(j) * (record.stratHemi.getCosThetaMinus(j) - record.stratHemi.getCosThetaPlus(j)) /
+							(record.stratHemi.getSinTheta(j) * fmin(sRay.tmax, oldRayLength[j])) *
+							(radiance - oldRad[j]);
+				}
+			}
+			record.irr += radiance;
+			record.changeSampleRadius(sRay.tmax);
+			// copy new rays and irradiance values over old ones
+			oldRad[j] = radiance;
+			oldRayLength[j] = sRay.tmax; // ToDo: check that ray length when no intercept is big
+			innerRotValues -= record.stratHemi.getTanTheta(j) * radiance;
+			//Y_INFO << "Tan(theta): " << icRecord.stratHemi.getTanTheta(j) << " - Radiance: "<< radiance << "\n";
+			//Y_INFO << "innerRotValues: " << innerRotValues << std::endl;
+		}
+		record.rotGrad[0] += record.stratHemi.getVk(k) * innerRotValues.R;
+		record.rotGrad[1] += record.stratHemi.getVk(k) * innerRotValues.G;
+		record.rotGrad[2] += record.stratHemi.getVk(k) * innerRotValues.B;
+		record.transGrad[0] +=
+				( (innerTransValuesU.R * M_2PI / (float)record.getN() ) *
+				  record.stratHemi.getUk(k) ) +
+				( innerTransValuesV.R *
+				  record.stratHemi.getVkMinus(k) );
+		record.transGrad[1] +=
+				( (innerTransValuesU.G * M_2PI / (float)record.getN() ) *
+				  record.stratHemi.getUk(k) ) +
+				( innerTransValuesV.G *
+				  record.stratHemi.getVkMinus(k) );
+		record.transGrad[2] +=
+				( (innerTransValuesU.B * M_2PI / (float)record.getN() ) *
+				  record.stratHemi.getUk(k) ) +
+				( innerTransValuesV.B *
+				  record.stratHemi.getVkMinus(k) );
+	}
+	float k = M_PI / ((float)record.getM() * (float)record.getN());
+	record.irr = record.irr * k;
+	for (int i=0; i<3; i++) {
+		record.rotGrad[i] = changeBasis(
+				record.rotGrad[i] * k,
+				record.NU,
+				record.NV,
+				record.getNup());
+		record.transGrad[i] = changeBasis(
+				record.transGrad[i],
+				record.NU,
+				record.NV,
+				record.getNup());
+	}
+	// HEURISTICS
+	// limit r_i by gradient
+	record.radius = std::min(record.sampleRadius,
+							 std::min(record.irr.R / record.transGrad[0].length(),
+									  std::min(record.irr.G / record.transGrad[1].length(),
+											   record.irr.B / record.transGrad[2].length()))
+							 );
+	// clamp r_i
+	record.radius = std::min(std::max(record.radius, record.minProjR), record.maxProjR);
+	// limit gradient
+	for (int i=0; i<3; i++) {
+		record.transGrad[i] =
+				record.transGrad[i] * std::min(1.f, record.sampleRadius / record.minProjR);
+	}
+	// return a copy of record
+	return record;
+}
+
+void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &record) const {
+	if (!ray.hasDifferentials)
+		Y_INFO << "ERROR: ray from mcIntegrator_t::createNewICRecord() should have differentials" << std::endl;
+	float oldRayLength[record.getM()];
+	color_t oldRad[record.getM()];
+	// we set the projected pixel area on the surface point
+	record.setPixelArea(ray);
+	ray_t sRay; // ray from hitpoint to hemisphere sample direction
+	sRay.from = record.P;
+	color_t innerRotValues;
+	color_t innerTransValuesU;
+	color_t innerTransValuesV;
+	color_t radiance;
+	for (int k=0; k<record.getN(); k++) {
+		innerRotValues.black();
+		innerTransValuesU.black();
+		innerTransValuesV.black();
+		for (int j=0; j<record.getM(); j++) {
+			// Calculate each incoming radiance of hemisphere at point icRecord
+			sRay.dir = record.getSampleHemisphere(j, k);
+			radiance = getRadiance(state, sRay);
+			// note: oldRad[j] and oldRayLength[j] means L_j,k-1 and r_j,k-1 respectively
+			//       oldRad[j-1] and oldRayLength[j-1] means L_j-1,k and r_j-1,k respectively
+			if (k>0) {
+				if (j>0) {
+					// cos2(theta_j-)sin(theta_j-) * (L_j,k - L_j-1,k) / min(r_j,k , r_j-1,k)
+					innerTransValuesU +=
+							(record.stratHemi.getCosThetaMinus(j)*record.stratHemi.getCosThetaMinus(j)) /
+							(fmin(sRay.tmax, oldRayLength[j-1])) *
+							(radiance - oldRad[j-1]);
+					// cos(theta_j)[cos(theta_j-) - cos(theta_j+)] * (L_j,k - L_j,k-1) / [sin(theta_j,k) * min(r_j,k , r_j-1,k)]
+					innerTransValuesV +=
+							record.stratHemi.getCosTheta(j) * (record.stratHemi.getCosThetaMinus(j) - record.stratHemi.getCosThetaPlus(j)) /
+							(record.stratHemi.getSinTheta(j) * fmin(sRay.tmax, oldRayLength[j])) *
+							(radiance - oldRad[j]);
+				}
+			}
+			record.irr += radiance;
+			record.changeSampleRadius(sRay.tmax);
+			// copy new rays and irradiance values over old ones
+			oldRad[j] = radiance;
+			oldRayLength[j] = sRay.tmax; // ToDo: check that ray length when no intercept is big
+			innerRotValues -= record.stratHemi.getTanTheta(j) * radiance;
+			//Y_INFO << "Tan(theta): " << icRecord.stratHemi.getTanTheta(j) << " - Radiance: "<< radiance << "\n";
+			//Y_INFO << "innerRotValues: " << innerRotValues << std::endl;
+		}
+		record.rotGrad[0] += record.stratHemi.getVk(k) * innerRotValues.R;
+		record.rotGrad[1] += record.stratHemi.getVk(k) * innerRotValues.G;
+		record.rotGrad[2] += record.stratHemi.getVk(k) * innerRotValues.B;
+		record.transGrad[0] +=
+				( (innerTransValuesU.R * M_2PI / (float)record.getN() ) *
+				  record.stratHemi.getUk(k) ) +
+				( innerTransValuesV.R *
+				  record.stratHemi.getVkMinus(k) );
+		record.transGrad[1] +=
+				( (innerTransValuesU.G * M_2PI / (float)record.getN() ) *
+				  record.stratHemi.getUk(k) ) +
+				( innerTransValuesV.G *
+				  record.stratHemi.getVkMinus(k) );
+		record.transGrad[2] +=
+				( (innerTransValuesU.B * M_2PI / (float)record.getN() ) *
+				  record.stratHemi.getUk(k) ) +
+				( innerTransValuesV.B *
+				  record.stratHemi.getVkMinus(k) );
+	}
+	float k = M_PI / ((float)record.getM() * (float)record.getN());
+	record.irr = record.irr * k;
+	for (int i=0; i<3; i++) {
+		record.rotGrad[i] = changeBasis(
+				record.rotGrad[i] * k,
+				record.NU,
+				record.NV,
+				record.getNup());
+		record.transGrad[i] = changeBasis(
+				record.transGrad[i],
+				record.NU,
+				record.NV,
+				record.getNup());
+	}
+	// HEURISTICS
+	// limit r_i by gradient
+	record.radius = std::min(record.sampleRadius,
+							 std::min(record.irr.R / record.transGrad[0].length(),
+									  std::min(record.irr.G / record.transGrad[1].length(),
+											   record.irr.B / record.transGrad[2].length()))
+							 );
+	// clamp r_i
+	record.radius = std::min(std::max(record.radius, record.minProjR), record.maxProjR);
+	// limit gradient
+	for (int i=0; i<3; i++) {
+		record.transGrad[i] =
+				record.transGrad[i] * std::min(1.f, record.sampleRadius / record.minProjR);
+	}
+}
+
 __END_YAFRAY

@@ -23,6 +23,7 @@
 
 #include <core_api/tiledintegrator.h>
 #include <yafraycore/photon.h>
+#include <yafraycore/irradianceCache.h>
 
 __BEGIN_YAFRAY
 
@@ -43,8 +44,32 @@ class YAFRAYCORE_EXPORT mcIntegrator_t: public tiledIntegrator_t
 		virtual color_t estimateCausticPhotons(renderState_t &state, const surfacePoint_t &sp, const vector3d_t &wo) const;
 		/*! Samples ambient occlusion for a given surface point */
 		virtual color_t sampleAmbientOcclusion(renderState_t &state, const surfacePoint_t &sp, const vector3d_t &wo) const;
-		
-		int rDepth; //! Ray depth
+
+		/*! Samples irradiance for a given surface point (in this implementation it uses an irradiance cache) */
+		virtual color_t sampleIrradiance(renderState_t &state, const surfacePoint_t &sp, const vector3d_t &wo) const
+		{
+			color_t color;
+			return color;
+		 }
+
+		/*! Samples radiance for a given surface point
+		  \param state current state of scene rendering
+		  \param ray indicates the place of the sample and incoming radiance's direction. In ray.tmax we return the lenght of the ray
+		  \return Value of radiance
+		  */
+		virtual color_t getRadiance(renderState_t &state, ray_t &ray) const;
+
+		/*! Creates a new irradiance cache's record for a given point
+		  \param state current state of scene rendering
+		  \param ray ray that hits the surface where the icRecord will be created
+		  \param sp position of the icRecord, already calculated with scene.intersect or similar with ray
+		  \return a new irradiance cache's record
+		  */
+		virtual icRec_t createNewICRecord(renderState_t &state, diffRay_t &ray, const surfacePoint_t &sp) const;
+
+		virtual void setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &record) const;
+
+		int rDepth; //! Ray depth0
 		bool trShad; //! Use transparent shadows
 		int sDepth; //! Shadow depth for transparent shadows
 
@@ -66,6 +91,9 @@ class YAFRAYCORE_EXPORT mcIntegrator_t: public tiledIntegrator_t
 		int nPaths; //! Number of samples for mc raytracing
 		int maxBounces; //! Max. path depth for mc raytracing
 		std::vector<light_t*> lights; //! An array containing all the scene lights
+
+
+		icTree_t *icTree; //! contains a pointer to a Irradiance Cache tree
 };
 
 __END_YAFRAY
