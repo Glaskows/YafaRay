@@ -91,7 +91,10 @@ bool directIC_t::preprocess()
 	//((qtFilm_t *)imageFilm)->drawTriangle(10, 10, 3);
 
 	// setup cache tree
-	icTree = new icTree_t(scene->getSceneBound());
+	if(useIrradianceCache)
+	{
+		icTree = new icTree_t(scene->getSceneBound());
+	}
 
 	return success;
 }
@@ -139,9 +142,9 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 		// create new memory on stack for material setup
 		unsigned char *newUserData[USER_DATA_SIZE];
 		state.userdata = (void *)newUserData;
-		const material_t *material = icRecord.material;
+		const material_t *material = sp.material;
 		BSDF_t bsdfs;
-		material->initBSDF(state, icRecord, bsdfs);
+		material->initBSDF(state, sp, bsdfs);
 
 		vector3d_t wo = -ray.dir;
 		if(state.raylevel == 0) state.includeLights = true;
@@ -157,19 +160,21 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 			if(useAmbientOcclusion) col += sampleAmbientOcclusion(state, sp, wo);
 
 			// check for an interpolated result
-			if (ray.hasDifferentials) {
-				icRec_t icRecord(10, 2.5f, sp); // M, Kappa
-				icRecord.setNup(wo);
-				icRecord.setPixelArea(ray);
-				if (!icTree->getIrradiance(icRecord)) {
-					setICRecord(state, ray, icRecord);
-					icTree->add(icRecord);
-				}
-				col += icRecord.irr * icRecord.material->eval(state, icRecord, wo, icRecord.getNup(), BSDF_DIFFUSE) * M_1_PI;
-			} else
-				Y_INFO << "NO DIFFERENTIALS!!!" << std::endl;
+			if (useIrradianceCache) {
+				if (ray.hasDifferentials) {
+					icRec_t icRecord(icMDivs, icKappa, sp); // M, Kappa
+					icRecord.setNup(wo);
+					icRecord.setPixelArea(ray);
+					if (!icTree->getIrradiance(icRecord)) {
+						setICRecord(state, ray, icRecord);
+						icTree->add(icRecord);
+					}
+					col += icRecord.irr * icRecord.material->eval(state, icRecord, wo, icRecord.getNup(), BSDF_DIFFUSE) * M_1_PI;
+				} else
+					Y_INFO << "NO DIFFERENTIALS!!!" << std::endl;
+			}
 		}
-
+		
 		// Reflective?, Refractive?
 		recursiveRaytrace(state, ray, bsdfs, sp, wo, col, alpha);
 		float m_alpha = material->getAlpha(state, sp, wo);
@@ -196,7 +201,9 @@ integrator_t* directIC_t::factory(paraMap_t &params, renderEnvironment_t &render
 	double cRad = 0.25;
 	double AO_dist = 1.0;
 	color_t AO_col(1.f);
-
+	bool do_IC=false;
+	int IC_M=10;
+	double IC_K=2.5;
 	params.getParam("raydepth", raydepth);
 	params.getParam("transpShad", transpShad);
 	params.getParam("shadowDepth", shadowDepth);
@@ -209,6 +216,9 @@ integrator_t* directIC_t::factory(paraMap_t &params, renderEnvironment_t &render
 	params.getParam("AO_samples", AO_samples);
 	params.getParam("AO_distance", AO_dist);
 	params.getParam("AO_color", AO_col);
+	params.getParam("do_IC", do_IC);
+	params.getParam("IC_M_Divs", IC_M);
+	params.getParam("IC_Kappa", IC_K);
 
 	directIC_t *inte = new directIC_t(transpShad, shadowDepth, raydepth);
 	// caustic settings
@@ -222,6 +232,10 @@ integrator_t* directIC_t::factory(paraMap_t &params, renderEnvironment_t &render
 	inte->aoSamples = AO_samples;
 	inte->aoDist = (PFLOAT)AO_dist;
 	inte->aoCol = AO_col;
+	// IC settings
+	inte->useIrradianceCache = do_IC;
+	inte->icMDivs = IC_M;
+	inte->icKappa = IC_K;
 	return inte;
 }
 

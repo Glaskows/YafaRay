@@ -31,7 +31,6 @@ __BEGIN_YAFRAY
 vector3d_t stratifiedHemisphere::getDirection(int j, int k) {
 	if (j<0 || j>M || k<0 || k>N)
 		Y_INFO << "ERROR(stratifiedHemisphere.getDirection): j, k out of bound" << std::endl;
-	// ToDo: change seeds!
 	double s1 = rnd();
 	double s2 = rnd();
 	float tmp = (j+s1)/M;
@@ -40,47 +39,6 @@ vector3d_t stratifiedHemisphere::getDirection(int j, int k) {
 	return vector3d_t(sinTheta * fCos(phi),
 					  sinTheta * fSin(phi),
 					  fSqrt(1 - tmp));
-}
-
-// ToDo: try to reuse cos, sin, angles...
-vector3d_t stratifiedHemisphere::getUk(int k) const {
-	float phi = M_2PI * ((float)k + 0.5f) / (float)N;
-	return vector3d_t(fCos(phi), fSin(phi), 0.f);
-}
-
-vector3d_t stratifiedHemisphere::getVk(int k) const {
-	float phi = M_2PI * ((float)k + 0.5f) / (float)N;
-	return vector3d_t(-fSin(phi), fCos(phi), 0.f);
-}
-
-vector3d_t stratifiedHemisphere::getVkMinus(int k) const {
-	float phi = M_2PI * (float)k / (float)N;
-	return vector3d_t(-fSin(phi), fCos(phi), 0.f);
-}
-
-float stratifiedHemisphere::getTanTheta(int j) const {
-	return fSqrt( ((float)j+0.5f) / ((float)M - (float)j - 0.5) );
-	//return fTan(fAsin( fSqrt( ((float)j+0.5f) / (float) M ) ));
-}
-
-float stratifiedHemisphere::getSinTheta(int j) const {
-	return fSqrt( ((float)j + 0.5f) / (float)M );
-}
-
-float stratifiedHemisphere::getSinThetaMinus(int j) const {
-	return fSqrt( (float)j / (float)M );
-}
-
-float stratifiedHemisphere::getCosTheta(int j) const {
-	return fSqrt( 1.0f - ((float)j + 0.5f) / (float)M );
-}
-
-float stratifiedHemisphere::getCosThetaMinus(int j) const {
-	return fSqrt( 1.0f - (float)j / (float)M );
-}
-
-float stratifiedHemisphere::getCosThetaPlus(int j) const {
-	return fSqrt( 1.0f - ((float)j + 1.0f) / (float)M );
 }
 
 // icREC_t METHODS
@@ -102,23 +60,7 @@ void icRec_t::changeSampleRadius(float newr) {
 	// we use minimal distance radius (without clamping for now)
 	if (newr < sampleRadius) {
 		sampleRadius = newr;
-		//invRadius = 1.f / sampleRadius;
 	}
-}
-
-float icRec_t::getRadius() const {
-	return radius;
-	float rad = sampleRadius;
-	// limit by gradient
-	// TODO: ¿radius for each component?
-	rad = std::min(rad,
-				   std::min(irr.R / transGrad[0].length(),
-							std::min(irr.G / transGrad[1].length(),
-									 irr.B / transGrad[2].length()))
-				   );
-	// clamp by pixel area
-	rad = std::min(std::max(rad, minProjR), maxProjR);
-	return rad;
 }
 
 float icRec_t::getWeight(const icRec_t &record) const {
@@ -128,13 +70,12 @@ float icRec_t::getWeight(const icRec_t &record) const {
 		return 0.f;
 	}
 	float epNor = fSqrt(1.f - dot) * NORMALIZATION_TERM;
-	float epPos = (P - record.P).length() * 2.f / getRadius();
+	float epPos = (P - record.P).length() * 2.f / radius;
 	float weight = 1.f - kappa * fmax(epPos, epNor);
 	return weight;
 }
 
 bound_t icRec_t::getBound() const {
-	float radius = getRadius();
 	return bound_t(P - radius, P + radius);
 }
 
@@ -149,6 +90,22 @@ void icRec_t::setNup(const vector3d_t &wo) {
 	Nup = FACE_FORWARD(Ng, N, wo);
 }
 
+void icRec_t::limitRbyGradient() {
+	radius = std::min(sampleRadius, std::min(irr.R / transGrad[0].length(),
+											 std::min(irr.G / transGrad[1].length(),
+													  irr.B / transGrad[2].length())) );
+}
+
+void icRec_t::clampR() {
+	radius = std::min(std::max(radius, minProjR), maxProjR);
+}
+
+void icRec_t::clampGradient() {
+	for (int i=0; i<3; i++) {
+		transGrad[i] =
+				transGrad[i] * std::min(1.f, sampleRadius / minProjR);
+	}
+}
 
 //
 // ***********************************************************************
@@ -175,8 +132,7 @@ bool icTree_t::icLookup_t::operator()(const point3d_t &p, const icRec_t &sample)
 		transGradResult.R = posDif * sample.transGrad[0];
 		transGradResult.G = posDif * sample.transGrad[1];
 		transGradResult.B = posDif * sample.transGrad[2];
-		//Y_INFO << sample.rotGrad[0] << " " << sample.rotGrad[0] << " " << sample.rotGrad[2] << ": " << rotGradResult << std::endl;
-		radSamples.push_back( (sample.irr /*+ rotGradResult*/ + transGradResult) * weight );
+		radSamples.push_back( (sample.irr + rotGradResult + transGradResult) * weight );
 		totalWeight += weight;
 	}
 	return true; // when could it be false? example?
@@ -193,9 +149,7 @@ bool icTree_t::getIrradiance(icRec_t &record) {
 	for (unsigned int i=0; i<lookupProc.radSamples.size(); i++) {
 		record.irr += lookupProc.radSamples[i];
 	}
-	//Y_INFO<<"Total weight: "<<lookupProc.totalWeight<<std::endl;
 	record.irr = record.irr / lookupProc.totalWeight; // E(p) = Sum(E_i(p) * w_i(p)) / Sum(w_i(p))
-	//Y_INFO << "Weight: " << wIrr << std::endl;
 	return true;
 }
 

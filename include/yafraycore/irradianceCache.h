@@ -52,7 +52,7 @@ inline vector3d_t changeBasis(const vector3d_t &vec, const vector3d_t &nx, const
   */
 struct stratifiedHemisphere {
 	stratifiedHemisphere(int nm):
-			M(nm), N(M_PI * M), rnd((unsigned)1/*time(0)*/) {
+			M(nm), N(M_PI * M), rnd((unsigned)/*1*/time(0)) {
 	}
 	// METHODS
 	vector3d_t getDirection(int j, int k); //!< get random direction sample from section j,k in local coordinate system
@@ -81,8 +81,7 @@ struct icRec_t : public surfacePoint_t
 	// METHODS
 	vector3d_t		getSampleHemisphere(int j, int k); //!< compute indirect light with direct lighting of first bounce
 	float			getWeight(const icRec_t &record) const;
-	float			getRadius() const; //!< return the radius of the sample "action" area
-	float			getInvRadius() const { return invRadius; } //!< return 1.f/radius
+	inline float	getRadius() const { return radius; } //!< return the radius of the sample "action" area
 	bound_t			getBound() const; //!< get the bounding box of the sample sphere
 	int				getM() const { return stratHemi.M; } //!< return the number of division if hemisphere along theta
 	int				getN() const { return stratHemi.N; } //!< return the number of division if hemisphere along phi
@@ -90,6 +89,9 @@ struct icRec_t : public surfacePoint_t
 	void			setPixelArea(const diffRay_t &dir); //!< calculates the projected pixel area on the surface position of the sample
 	void			setNup(const vector3d_t &wo);
 	const vector3d_t& getNup() const { return Nup; }
+	void			limitRbyGradient();
+	void			clampR();
+	void			clampGradient();
 	// VARIABLES
 	float			w; //!< weight of the sample
 	color_t			irr; //!< cached irradiance
@@ -97,7 +99,6 @@ struct icRec_t : public surfacePoint_t
 	vector3d_t		transGrad[3];
 	stratifiedHemisphere stratHemi; //!< sampling hemisphere at point location
 	float			sampleRadius; //!< minimum distance of all rays from hemisphere sampling
-	float			radius; //!< radius of the sample, based on sample raidius, projected pixel area, gradients, etc...
 	float			minProjR; //!< min radius based on screen space (1-3 times projected pixel area)
 	float			maxProjR; //!< max radius based on screen space (20 times projected pixel area)
 	// ToDo: add rotation and translation gradients
@@ -105,18 +106,16 @@ struct icRec_t : public surfacePoint_t
 	// ToDo: adaptative sampling
 	static const float NORMALIZATION_TERM = 8.113140441; //!< from T&L weight function normalization term 1/sqrt(1-cos10°) for 10°
 private:
+	float			radius; //!< radius of the sample, based on sample raidius, projected pixel area, gradients, etc...
 	vector3d_t		Nup; //!< normal vector on the side of the hitting ray
 	float			pArea; //!< projected pixel area over the sample
 	float			kappa; //!< overall changing accuaracy constant
-
-	float			invRadius; //!< inverse of radius
-
 };
 
 
 struct icTree_t : public octree_t<icRec_t>
 {
-	icTree_t(const bound_t &bound):octree_t<icRec_t>(bound, 15) {}
+	icTree_t(const bound_t &bound):octree_t<icRec_t>(bound, 10) {}
 	//! Get irradiance estimation at point p. Return false if there isn't a cached irradiance sample near.
 	bool getIrradiance(icRec_t &record);
 	//! Add a new cached irradiance sample
@@ -130,6 +129,46 @@ struct icTree_t : public octree_t<icRec_t>
 	};
 };
 
+// INLINE FUNCTIONS
+inline vector3d_t stratifiedHemisphere::getUk(int k) const {
+	float phi = M_2PI * ((float)k + 0.5f) / (float)N;
+	return vector3d_t(fCos(phi), fSin(phi), 0.f);
+}
+
+inline vector3d_t stratifiedHemisphere::getVk(int k) const {
+	float phi = M_2PI * ((float)k + 0.5f) / (float)N;
+	return vector3d_t(-fSin(phi), fCos(phi), 0.f);
+}
+
+inline vector3d_t stratifiedHemisphere::getVkMinus(int k) const {
+	float phi = M_2PI * (float)k / (float)N;
+	return vector3d_t(-fSin(phi), fCos(phi), 0.f);
+}
+
+inline float stratifiedHemisphere::getTanTheta(int j) const {
+	return fSqrt( ((float)j+0.5f) / ((float)M - (float)j - 0.5) );
+	//return fTan(fAsin( fSqrt( ((float)j+0.5f) / (float) M ) ));
+}
+
+inline float stratifiedHemisphere::getSinTheta(int j) const {
+	return fSqrt( ((float)j + 0.5f) / (float)M );
+}
+
+inline float stratifiedHemisphere::getSinThetaMinus(int j) const {
+	return fSqrt( (float)j / (float)M );
+}
+
+inline float stratifiedHemisphere::getCosTheta(int j) const {
+	return fSqrt( 1.0f - ((float)j + 0.5f) / (float)M );
+}
+
+inline float stratifiedHemisphere::getCosThetaMinus(int j) const {
+	return fSqrt( 1.0f - (float)j / (float)M );
+}
+
+inline float stratifiedHemisphere::getCosThetaPlus(int j) const {
+	return fSqrt( 1.0f - ((float)j + 1.0f) / (float)M );
+}
 __END_YAFRAY
 
 #endif // Y_IRRADIANCECACHE_H
