@@ -706,8 +706,8 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 				record.getNup());
 	}
 	// HEURISTICS
-	record.limitRbyGradient();
-	record.clampR();
+	record.clampRbyGradient();
+	record.clampRbyScreenSpace();
 	record.clampGradient();
 }
 

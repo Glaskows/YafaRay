@@ -52,7 +52,7 @@ inline vector3d_t changeBasis(const vector3d_t &vec, const vector3d_t &nx, const
   */
 struct stratifiedHemisphere {
 	stratifiedHemisphere(int nm):
-			M(nm), N(M_PI * M), rnd((unsigned)/*1*/time(0)) {
+			M(nm), N(M_PI * M), rnd((unsigned)1/*time(0)*/) {
 	}
 	// METHODS
 	vector3d_t getDirection(int j, int k); //!< get random direction sample from section j,k in local coordinate system
@@ -81,7 +81,7 @@ struct icRec_t : public surfacePoint_t
 	// METHODS
 	vector3d_t		getSampleHemisphere(int j, int k); //!< compute indirect light with direct lighting of first bounce
 	float			getWeight(const icRec_t &record) const;
-	inline float	getRadius() const { return radius; } //!< return the radius of the sample "action" area
+	inline float	getRadius() const { return rClamp; } //!< return the radius of the sample "action" area
 	bound_t			getBound() const; //!< get the bounding box of the sample sphere
 	int				getM() const { return stratHemi.M; } //!< return the number of division if hemisphere along theta
 	int				getN() const { return stratHemi.N; } //!< return the number of division if hemisphere along phi
@@ -89,24 +89,28 @@ struct icRec_t : public surfacePoint_t
 	void			setPixelArea(const diffRay_t &dir); //!< calculates the projected pixel area on the surface position of the sample
 	void			setNup(const vector3d_t &wo);
 	const vector3d_t& getNup() const { return Nup; }
-	void			limitRbyGradient();
-	void			clampR();
+	bool			inFront(const icRec_t &record) const;
+	void			clampRbyGradient();
+	void			clampRbyScreenSpace();
+	void			clampRbyNeighbor();
 	void			clampGradient();
+	void			setRNeighbor(float r);
 	// VARIABLES
 	float			w; //!< weight of the sample
 	color_t			irr; //!< cached irradiance
 	vector3d_t		rotGrad[3];
 	vector3d_t		transGrad[3];
 	stratifiedHemisphere stratHemi; //!< sampling hemisphere at point location
-	float			sampleRadius; //!< minimum distance of all rays from hemisphere sampling
-	float			minProjR; //!< min radius based on screen space (1-3 times projected pixel area)
-	float			maxProjR; //!< max radius based on screen space (20 times projected pixel area)
+	float			r; //!< minimum distance of all rays from hemisphere sampling
+	float			rMin; //!< min radius based on screen space (1-3 times projected pixel area)
+	float			rMax; //!< max radius based on screen space (20 times projected pixel area)
+	float			rNeighbor; //!< saves the neighbor clamped radius
 	// ToDo: add rotation and translation gradients
 	// ToDo: add distance to surfaces, minimum and maximum spacing threshold (for neighbor clamping)
 	// ToDo: adaptative sampling
 	static const float NORMALIZATION_TERM = 8.113140441; //!< from T&L weight function normalization term 1/sqrt(1-cos10°) for 10°
 private:
-	float			radius; //!< radius of the sample, based on sample raidius, projected pixel area, gradients, etc...
+	float			rClamp; //!< radius clamped by projected pixel area and gradients
 	vector3d_t		Nup; //!< normal vector on the side of the hitting ray
 	float			pArea; //!< projected pixel area over the sample
 	float			kappa; //!< overall changing accuaracy constant
@@ -119,10 +123,15 @@ struct icTree_t : public octree_t<icRec_t>
 	//! Get irradiance estimation at point p. Return false if there isn't a cached irradiance sample near.
 	bool getIrradiance(icRec_t &record);
 	//! Add a new cached irradiance sample
-	void add(const icRec_t &rec);
+	void add(const icRec_t &record);
+	//! Perform neighbor clamping on record
+	void neighborClamp(icRec_t &record);
+private:
+	void recursiveFindNear(octNode_t<icRec_t> *node, const bound_t &nodeBound, const icRec_t &record,
+						   std::vector<icRec_t *> &nearRecs, float &minR);
 	struct icLookup_t {
 		icLookup_t(const icRec_t &rec): record(rec),totalWeight(0.f) {}
-		bool operator()(const point3d_t &p, const icRec_t &);
+		bool operator()(const point3d_t &p, const icRec_t &record);
 		std::vector<color_t> radSamples;
 		const icRec_t &record;
 		float totalWeight;

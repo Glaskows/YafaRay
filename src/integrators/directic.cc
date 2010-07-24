@@ -167,6 +167,7 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 					icRecord.setPixelArea(ray);
 					if (!icTree->getIrradiance(icRecord)) {
 						setICRecord(state, ray, icRecord);
+						icTree->neighborClamp(icRecord);
 						icTree->add(icRecord);
 					}
 					col += icRecord.irr * icRecord.material->eval(state, icRecord, wo, icRecord.getNup(), BSDF_DIFFUSE) * M_1_PI;
@@ -174,7 +175,6 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 					Y_INFO << "NO DIFFERENTIALS!!!" << std::endl;
 			}
 		}
-		
 		// Reflective?, Refractive?
 		recursiveRaytrace(state, ray, bsdfs, sp, wo, col, alpha);
 		float m_alpha = material->getAlpha(state, sp, wo);
