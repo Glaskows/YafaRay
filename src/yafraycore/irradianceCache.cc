@@ -274,28 +274,31 @@ void icTree_t::saveToXml(const std::string &fileName) {
 	// RECURSIVE? saveNodeToXml(writer, & root);
 
 	octNode_t<icRec_t> *nodes[maxDepth+1];
-	int child[maxDepth+1];
+	int sibling[maxDepth+1];
 
 	int level = 0;
 	nodes[0] = &root;
-	child[0] = 0;
+	sibling[0] = 8;
+	sibling[1] = 0;
 
 	// search for the next valid node
 	do {
 		//  go down one level
 		level++;
-		nodes[level] = nodes[level-1]->children[child[level-1]];
-		child[level] = 0;
-		// if not a valid node, one up, one "right"
-		if (!nodes[level])
+		nodes[level] = nodes[level-1]->children[sibling[level]];
+		sibling[level+1] = 0;
+		// if not a valid node
+		if (!nodes[level]) {
+			// go up until can move to next sibling
 			do {
-			level--;
-			child[level]++;
-		} while (child[level]==8 && level >= 0);
+				sibling[level]++;
+				level--;
+			} while (sibling[level+1]==8);
+		}
 		else // find a valid one
 		{
 			// proccess data
-			Y_INFO << "level: " << level << " - Sibling: " << child[level] << " - N° nodos: " << nodes[level]->data.size() << std::endl;
+			Y_INFO << "level: " << level << " - Sibling: " << sibling[level] << " - N° nodos: " << nodes[level]->data.size() << std::endl;
 		}
 	} while (level>=0);
 
