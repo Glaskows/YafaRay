@@ -280,32 +280,24 @@ void icTree_t::saveToXml(const std::string &fileName) {
 	nodes[0] = &root;
 	child[0] = 0;
 
+	// search for the next valid node
 	do {
-		// process data
-		Y_INFO << "level: " << level << " - Sibling: " << child[level] << " - N° nodos: " << nodes[level]->data.size() << std::endl;
-
-		// go down one level down
+		//  go down one level
 		level++;
-
-		nodes[level] = nodes[level-1]->children[child[level-1]]; //nodes[level-1]->children[0];
+		nodes[level] = nodes[level-1]->children[child[level-1]];
 		child[level] = 0;
-
-		// until we find a valid node
-		while (!nodes[level]) {
-			// try to go to next ancestor brother
+		// if not a valid node, one up, one "right"
+		if (!nodes[level])
 			do {
-				level--;
-			} while (child[level]==7 && level>=0);
-			if (level >= 0) {
-				child[level]++;
-				level++;
-				nodes[level] = nodes[level-1]->children[child[level-1]];
-				child[level] = 0;
-			} else {
-				break; // get out of valid node check
-			}
+			level--;
+			child[level]++;
+		} while (child[level]==8 && level >= 0);
+		else // find a valid one
+		{
+			// proccess data
+			Y_INFO << "level: " << level << " - Sibling: " << child[level] << " - N° nodos: " << nodes[level]->data.size() << std::endl;
 		}
-	} while (level >= 0 );
+	} while (level>=0);
 
 	// Close the element named ICtree
 	rc = xmlTextWriterEndElement(writer);
