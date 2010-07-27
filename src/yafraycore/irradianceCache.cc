@@ -23,6 +23,13 @@
 
 #include <yafraycore/irradianceCache.h>
 
+#if HAVE_XML
+#include <libxml/parser.h>
+#include <libxml/encoding.h>
+#include <libxml/xmlwriter.h>
+#define MY_ENCODING "ISO-8859-1"
+#endif
+
 __BEGIN_YAFRAY
 
 // stratifiedHemisphere METHODS
@@ -239,5 +246,77 @@ bool icTree_t::getIrradiance(icRec_t &record) {
 	record.irr = record.irr / lookupProc.totalWeight; // E(p) = Sum(E_i(p) * w_i(p)) / Sum(w_i(p))
 	return true;
 }
+
+void icTree_t::saveToXml(const std::string &fileName) {
+	int rc;
+	xmlTextWriterPtr writer;
+	xmlChar *tmp;
+	Y_INFO << "Start dump of IC Tree to xml file: " << fileName << std::endl;
+	// Create a new XmlWriter for uri
+	writer = xmlNewTextWriterFilename(fileName.c_str(), 0);
+	if (writer == NULL) {
+		Y_INFO << "testXmlwriterFilename: Error creating the xml writer" << std::endl;
+		return;
+	}
+	// Start the document
+	rc = xmlTextWriterStartDocument(writer, NULL, MY_ENCODING, NULL);
+	if (rc < 0) {
+		Y_INFO << "testXmlwriterFilename: Error at xmlTextWriterStartDocument" << std::endl;
+		return;
+	}
+	// Create root element named ICtree
+	rc = xmlTextWriterStartElement(writer, BAD_CAST "ICtree");
+	if (rc < 0) {
+		Y_INFO << "testXmlwriterFilename: Error at xmlTextWriterStartElement\n" << std::endl;
+		return;
+	}
+
+	// RECURSIVE? saveNodeToXml(writer, & root);
+
+	octNode_t<icRec_t> *nodes[maxDepth+1];
+	int child[maxDepth+1];
+
+	int level = 0;
+	nodes[0] = &root;
+	child[0] = 0;
+
+	do {
+		// process data
+		Y_INFO << "level: " << level << " - Sibling: " << child[level] << " - N° nodos: " << nodes[level]->data.size() << std::endl;
+
+		// go down one level down
+		level++;
+
+		nodes[level] = nodes[level-1]->children[child[level-1]]; //nodes[level-1]->children[0];
+		child[level] = 0;
+
+		// until we find a valid node
+		while (!nodes[level]) {
+			// try to go to next ancestor brother
+			do {
+				level--;
+			} while (child[level]==7 && level>=0);
+			if (level >= 0) {
+				child[level]++;
+				level++;
+				nodes[level] = nodes[level-1]->children[child[level-1]];
+				child[level] = 0;
+			} else {
+				break; // get out of valid node check
+			}
+		}
+	} while (level >= 0 );
+
+	// Close the element named ICtree
+	rc = xmlTextWriterEndElement(writer);
+	if (rc < 0) {
+		Y_INFO << "testXmlwriterFilename: Error at xmlTextWriterEndElement\n" << std::endl;
+		return;
+	}
+
+	xmlFreeTextWriter(writer);
+	Y_INFO << "End xml dump" << std::endl;
+}
+
 
 __END_YAFRAY

@@ -119,13 +119,15 @@ private:
 
 struct icTree_t : public octree_t<icRec_t>
 {
-	icTree_t(const bound_t &bound):octree_t<icRec_t>(bound, 10) {}
+	icTree_t(const bound_t &bound, int levels):octree_t<icRec_t>(bound, levels) {}
 	//! Get irradiance estimation at point p. Return false if there isn't a cached irradiance sample near.
 	bool getIrradiance(icRec_t &record);
 	//! Add a new cached irradiance sample
 	void add(const icRec_t &record);
 	//! Perform neighbor clamping on record
 	void neighborClamp(icRec_t &record);
+	//! Store the entire tree (with IC records data) into an xml file named fileName
+	void saveToXml(const std::string &fileName);
 private:
 	void recursiveFindNear(octNode_t<icRec_t> *node, const bound_t &nodeBound, const icRec_t &record,
 						   std::vector<icRec_t *> &nearRecs, float &minR);
