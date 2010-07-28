@@ -250,8 +250,6 @@ bool icTree_t::getIrradiance(icRec_t &record) {
 void icTree_t::saveToXml(const std::string &fileName) {
 	int rc;
 	xmlTextWriterPtr writer;
-	xmlChar *tmp;
-	Y_INFO << "Start dump of IC Tree to xml file: " << fileName << std::endl;
 	// Create a new XmlWriter for uri
 	writer = xmlNewTextWriterFilename(fileName.c_str(), 0);
 	if (writer == NULL) {
@@ -260,25 +258,18 @@ void icTree_t::saveToXml(const std::string &fileName) {
 	}
 	// Start the document
 	rc = xmlTextWriterStartDocument(writer, NULL, MY_ENCODING, NULL);
-	if (rc < 0) {
-		Y_INFO << "testXmlwriterFilename: Error at xmlTextWriterStartDocument" << std::endl;
-		return;
-	}
 	// Create root element named ICtree
-	rc = xmlTextWriterStartElement(writer, BAD_CAST "ICtree");
-	if (rc < 0) {
-		Y_INFO << "testXmlwriterFilename: Error at xmlTextWriterStartElement\n" << std::endl;
-		return;
-	}
-
-	// RECURSIVE? saveNodeToXml(writer, & root);
+	xmlTextWriterStartElement(writer, BAD_CAST "ICtree");
+	xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "boundMin",
+										   "%f,%f,%f", treeBound.a.x, treeBound.a.y, treeBound.a.z );
+	xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "boundMax",
+										   "%f,%f,%f", treeBound.g.x, treeBound.g.y, treeBound.g.z );
 
 	octNode_t<icRec_t> *nodes[maxDepth+1];
 	int sibling[maxDepth+1];
-
 	int level = 0;
 	nodes[0] = &root;
-	sibling[0] = 8;
+	sibling[0] = 8; // end condition
 	sibling[1] = 0;
 
 	// search for the next valid node
@@ -289,28 +280,67 @@ void icTree_t::saveToXml(const std::string &fileName) {
 		sibling[level+1] = 0;
 		// if not a valid node
 		if (!nodes[level]) {
+			bool invalid = true;
 			// go up until can move to next sibling
 			do {
 				sibling[level]++;
 				level--;
+				// The first one is for invalid nodes.
+				if (invalid) {
+					invalid = false;
+				} else {
+					// Close ICNode node
+					rc = xmlTextWriterEndElement(writer);
+					if (rc < 0) {
+						Y_INFO << "testXmlwriterFilename: Error at closing ICNode \n" << std::endl;
+						return;
+					}
+				}
+
 			} while (sibling[level+1]==8);
 		}
 		else // find a valid one
 		{
-			// proccess data
-			Y_INFO << "level: " << level << " - Sibling: " << sibling[level] << " - N° nodos: " << nodes[level]->data.size() << std::endl;
+			// PROCESS DATA
+			int size = nodes[level]->data.size();
+			for (int i=0; i<size; i++) {
+				const icRec_t &record = nodes[level]->data[i];
+				// Create Record node
+				xmlTextWriterStartElement(writer, BAD_CAST "ICRecord");
+				// Save members
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "r", "%f", record.r );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rMin", "%f", record.rMin );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rMax", "%f", record.rMax );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rNeighbor", "%f", record.rNeighbor );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rClamp", "%f", record.getRadius() );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "irr", "%f,%f,%f", record.irr.R, record.irr.G, record.irr.B );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "nUp", "%f,%f,%f", record.getNup().x, record.getNup().y, record.getNup().z );
+				xmlTextWriterStartElement(writer, BAD_CAST "RotGrad");
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "r", "%f,%f,%f", record.rotGrad[0].x, record.rotGrad[0].y, record.rotGrad[0].z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "g", "%f,%f,%f", record.rotGrad[1].x, record.rotGrad[1].y, record.rotGrad[1].z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "b", "%f,%f,%f", record.rotGrad[2].x, record.rotGrad[2].y, record.rotGrad[2].z );
+				xmlTextWriterEndElement(writer);
+				xmlTextWriterStartElement(writer, BAD_CAST "TransGrad");
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "r", "%f,%f,%f", record.transGrad[0].x, record.transGrad[0].y, record.transGrad[0].z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "g", "%f,%f,%f", record.transGrad[1].x, record.transGrad[1].y, record.transGrad[1].z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "b", "%f,%f,%f", record.transGrad[2].x, record.transGrad[2].y, record.transGrad[2].z );
+				xmlTextWriterEndElement(writer);
+				// Close Record node
+				xmlTextWriterEndElement(writer);
+			}
+			// Create ICNode node
+			rc = xmlTextWriterStartElement(writer, BAD_CAST "ICNode");
+			if (rc < 0) {
+				Y_INFO << "testXmlwriterFilename: Error at xmlTextWriterStartElement\n" << std::endl;
+				return;
+			}
+			xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "dataSize", "%d", size );
+			xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "childId", "%d", sibling[level] );
 		}
 	} while (level>=0);
-
-	// Close the element named ICtree
-	rc = xmlTextWriterEndElement(writer);
-	if (rc < 0) {
-		Y_INFO << "testXmlwriterFilename: Error at xmlTextWriterEndElement\n" << std::endl;
-		return;
-	}
-
+	// We already close ICtree element in the last loop
+	xmlTextWriterEndDocument(writer);
 	xmlFreeTextWriter(writer);
-	Y_INFO << "End xml dump" << std::endl;
 }
 
 

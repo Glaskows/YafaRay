@@ -58,6 +58,7 @@ class YAFRAYCORE_EXPORT mcIntegrator_t: public tiledIntegrator_t
 		  \param record the record that it is going to be used to save the irradiance, needs to be initialized with ray's intersect position
 		  */
 		virtual void setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &record) const;
+		virtual void cleanup();
 
 		int rDepth; //! Ray depth0
 		bool trShad; //! Use transparent shadows

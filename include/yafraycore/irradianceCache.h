@@ -96,7 +96,6 @@ struct icRec_t : public surfacePoint_t
 	void			clampGradient();
 	void			setRNeighbor(float r);
 	// VARIABLES
-	float			w; //!< weight of the sample
 	color_t			irr; //!< cached irradiance
 	vector3d_t		rotGrad[3];
 	vector3d_t		transGrad[3];
