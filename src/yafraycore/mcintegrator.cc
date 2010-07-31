@@ -713,4 +713,8 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 	record.clampGradient();
 }
 
+void mcIntegrator_t::cleanup() {
+	icTree->saveToXml("dump.xml");
+}
+
 __END_YAFRAY

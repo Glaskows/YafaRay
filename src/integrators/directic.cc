@@ -93,7 +93,7 @@ bool directIC_t::preprocess()
 	// setup cache tree
 	if(useIrradianceCache)
 	{
-		icTree = new icTree_t(scene->getSceneBound());
+		icTree = new icTree_t(scene->getSceneBound(), 16);
 	}
 
 	return success;
