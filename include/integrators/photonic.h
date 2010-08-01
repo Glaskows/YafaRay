@@ -26,7 +26,10 @@ class YAFRAYPLUGIN_EXPORT photonIC_t: public mcIntegrator_t
 		~photonIC_t();
 		virtual bool preprocess();
 		virtual colorA_t integrate(renderState_t &state, diffRay_t &ray) const;
+		//virtual color_t getRadiance(renderState_t &state, ray_t &ray) const;
+		virtual color_t getRadiance(renderState_t &state, surfacePoint_t &sp, vector3d_t &wo) const;
 		static integrator_t* factory(paraMap_t &params, renderEnvironment_t &render);
+		virtual void cleanup();
 	protected:
 		color_t finalGathering(renderState_t &state, const surfacePoint_t &sp, const vector3d_t &wo) const;
 

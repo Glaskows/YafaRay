@@ -628,11 +628,6 @@ color_t mcIntegrator_t::sampleAmbientOcclusion(renderState_t &state, const surfa
 	return col / (float)n;
 }
 
-color_t mcIntegrator_t::getRadiance(renderState_t &state, ray_t &ray) const {
-	color_t color;
-	return color;
-}
-
 void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &record) const {
 	if (!ray.hasDifferentials)
 		Y_INFO << "ERROR: ray from mcIntegrator_t::createNewICRecord() should have differentials" << std::endl;
@@ -653,7 +648,8 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 		for (int j=0; j<record.getM(); j++) {
 			// Calculate each incoming radiance of hemisphere at point icRecord
 			sRay.dir = record.getSampleHemisphere(j, k);
-			radiance = getRadiance(state, sRay);
+			//radiance = getRadiance(state, sRay);
+			radiance = getRadiance(state, record, sRay.dir);
 			// note: oldRad[j] and oldRayLength[j] means L_j,k-1 and r_j,k-1 respectively
 			//       oldRad[j-1] and oldRayLength[j-1] means L_j-1,k and r_j-1,k respectively
 			if (k>0) {
@@ -714,7 +710,7 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 }
 
 void mcIntegrator_t::cleanup() {
-	icTree->saveToXml("dump.xml");
+	// do nothing, if IC implemented, may call the xml dump saving function
 }
 
 __END_YAFRAY
