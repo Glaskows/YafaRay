@@ -32,6 +32,10 @@ target_link_libraries(SkyIntegrator yafaraycore)
 add_library(directic SHARED directic.cc)
 target_link_libraries(directic yafaraycore)
 
+add_library(photonic SHARED photonic.cc)
+target_link_libraries(photonic yafaraycore)
+
 install (TARGETS directlight photonmap pathtrace bidirpath
-		EmissionIntegrator SingleScatterIntegrator EmptyVolumeIntegrator DebugIntegrator SkyIntegrator directic
+		EmissionIntegrator SingleScatterIntegrator EmptyVolumeIntegrator
+		DebugIntegrator SkyIntegrator directic photonic
 		${YAF_TARGET_TYPE} DESTINATION ${YAF_PLUGIN_DIR})
