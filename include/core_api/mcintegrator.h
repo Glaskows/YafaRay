@@ -50,10 +50,14 @@ class YAFRAYCORE_EXPORT mcIntegrator_t: public tiledIntegrator_t
 		  \param ray indicates the place of the sample and incoming radiance's direction. In ray.tmax we return the lenght of the ray
 		  \return Value of radiance
 		  */
-		/*virtual color_t getRadiance(renderState_t &state, ray_t &ray) const {
+		virtual color_t getRadiance(renderState_t &state, ray_t &ray) const {
 			color_t color;
 			return color;
-		}*/
+		}
+		virtual color_t getRadiance(renderState_t &state, surfacePoint_t &sp, ray_t &ray) const {
+			color_t color;
+			return color;
+		}
 		virtual color_t getRadiance(renderState_t &state, surfacePoint_t &sp, vector3d_t &wo) const {
 			color_t color;
 			return color;

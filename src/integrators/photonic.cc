@@ -777,7 +777,7 @@ color_t photonIC_t::finalGathering(renderState_t &state, const surfacePoint_t &s
 	return pathCol / (float)nSampl;
 }
 
-color_t photonIC_t::getRadiance(renderState_t &state, surfacePoint_t &sp, vector3d_t &wo) const
+color_t photonIC_t::getRadiance(renderState_t &state, ray_t &ray) const
 {
 	color_t pathCol(0.0);
 	void *first_udat = state.userdata;
@@ -791,10 +791,10 @@ color_t photonIC_t::getRadiance(renderState_t &state, surfacePoint_t &sp, vector
 	//{
 	color_t throughput( 1.0 );
 	PFLOAT length=0;
-	surfacePoint_t hit=sp;
-	vector3d_t pwo = wo;
+	surfacePoint_t hit;//=sp;
+	// vector3d_t pwo = wo;
 
-	ray_t pRay;
+	//ray_t ray;
 	BSDF_t matBSDFs;
 	bool did_hit;
 	const material_t *p_mat; // = sp.material;
@@ -817,17 +817,17 @@ color_t photonIC_t::getRadiance(renderState_t &state, surfacePoint_t &sp, vector
 	// if surface color is black nothing to do!
 	//if(scol.isBlack()) continue;
 
-	pRay.tmin = MIN_RAYDIST;
-	pRay.tmax = -1.0;
-	pRay.from = hit.P;
-	pRay.dir = pwo;
+	ray.tmin = MIN_RAYDIST; //pRay.tmin = MIN_RAYDIST;
+	ray.tmax = -1.0; //pRay.tmax = -1.0;
+	// pRay.from = hit.P;
+	// pRay.dir = pwo;
 	//throughput = scol;
 
 	// if doesn't hit anything, return black color
-	if( !(did_hit = scene->intersect(pRay, hit)) ) return pathCol;
+	if( !(did_hit = scene->intersect(ray, hit)) ) return pathCol;
 
 	p_mat = hit.material;
-	length = pRay.tmax;
+	length = ray.tmax;
 	state.userdata = n_udat;
 	matBSDFs = p_mat->getFlags();
 	bool has_spec = matBSDFs & BSDF_SPECULAR;
@@ -835,7 +835,7 @@ color_t photonIC_t::getRadiance(renderState_t &state, surfacePoint_t &sp, vector
 	bool close = length < gatherDist;
 	bool do_bounce = close || has_spec;
 	// further bounces construct a path just as with path tracing:
-	for(int depth=0; depth<gatherBounces && do_bounce; ++depth)
+	/*for(int depth=0; depth<gatherBounces && do_bounce; ++depth)
 	{
 		//Y_INFO << depth << std::endl;
 		int d4 = 4*depth;
@@ -907,18 +907,18 @@ color_t photonIC_t::getRadiance(renderState_t &state, surfacePoint_t &sp, vector
 		caustic = (caustic || !depth) && (sb.sampledFlags & (BSDF_SPECULAR | BSDF_FILTER));
 		close =  length < gatherDist;
 		do_bounce = caustic || close;
-	}
+	}*/
 
 	if(did_hit)
 	{
-		//Y_INFO << "DID HIT!" << std::endl;
 		p_mat->initBSDF(state, hit, matBSDFs);
 		if(matBSDFs & (BSDF_DIFFUSE | BSDF_GLOSSY))
 		{
-			vector3d_t sf = FACE_FORWARD(hit.Ng, hit.N, -pRay.dir);
+			vector3d_t sf = FACE_FORWARD(hit.Ng, hit.N, -ray.dir);//FACE_FORWARD(hit.Ng, hit.N, -pRay.dir);
 			const photon_t *nearest = radianceMap.findNearest(hit.P, sf, lookupRad);
 			if(nearest) lcol = nearest->color();
-			if(matBSDFs & BSDF_EMIT) lcol += p_mat->emit(state, hit, -pRay.dir);
+			// do we need to add the emited color?
+			if(matBSDFs & BSDF_EMIT) lcol += p_mat->emit(state, hit, -ray.dir);//-pRay.dir
 			pathCol += lcol * throughput;
 		}
 	}
@@ -981,7 +981,8 @@ colorA_t photonIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 								icTree->neighborClamp(icRecord);
 								icTree->add(icRecord);
 							}
-							col += icRecord.irr * M_1_PI * icRecord.material->eval(state, icRecord, wo, icRecord.getNup(), BSDF_DIFFUSE);
+							col += icRecord.irr * M_1_PI *
+								   icRecord.material->eval(state, icRecord, wo, icRecord.getNup(), BSDF_DIFFUSE);
 						} else
 							Y_INFO << "NO DIFFERENTIALS!!!" << std::endl;
 					} else {
@@ -991,7 +992,7 @@ colorA_t photonIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 			}
 		}
 		else
-		{
+		{ // WHEN THIS HAPPEND?
 			foundPhoton_t *gathered = (foundPhoton_t *)alloca(nDiffuseSearch * sizeof(foundPhoton_t));
 			PFLOAT radius = dsRadius; //actually the square radius...
 
