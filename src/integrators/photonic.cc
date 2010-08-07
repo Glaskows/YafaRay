@@ -777,153 +777,39 @@ color_t photonIC_t::finalGathering(renderState_t &state, const surfacePoint_t &s
 	return pathCol / (float)nSampl;
 }
 
-color_t photonIC_t::getRadiance(renderState_t &state, ray_t &ray) const
+color_t photonIC_t::getRadiance(renderState_t &state, surfacePoint_t &sp, ray_t &ray) const //surfacePoint_t &sp, vector3d_t &wo) const
 {
 	color_t pathCol(0.0);
 	void *first_udat = state.userdata;
 	unsigned char userdata[USER_DATA_SIZE+7];
 	void *n_udat = (void *)( &userdata[7] - ( ((size_t)&userdata[7])&7 ) ); // pad userdata to 8 bytes
-	const volumeHandler_t *vol;
-	color_t vcol(0.f);
-
-	//int nSampl = std::max(1, nPaths/state.rayDivision);
-	//for(int i=0; i<nSampl; ++i)
-	//{
-	color_t throughput( 1.0 );
-	PFLOAT length=0;
-	surfacePoint_t hit;//=sp;
-	// vector3d_t pwo = wo;
-
-	//ray_t ray;
+	surfacePoint_t hit = sp;
 	BSDF_t matBSDFs;
-	bool did_hit;
-	const material_t *p_mat; // = sp.material;
-	unsigned int offs = icMDivs * state.pixelSample + state.samplingOffs;
-	color_t lcol, scol;
-	// "zero'th" FG bounce:
-	float s1 = RI_vdC(offs);
-	float s2 = scrHalton(2, offs);
-	//if(state.rayDivision > 1)
-	//{
-	//	s1 = addMod1(s1, state.dc1);
-	//	s2 = addMod1(s2, state.dc2);
-	//}
-
-	//sample_t s(s1, s2, BSDF_DIFFUSE|BSDF_REFLECT|BSDF_TRANSMIT); // glossy/dispersion/specular done via recursive raytracing
-	//scol = p_mat->sample(state, hit, pwo, pRay.dir, s);
-
-	//if(s.pdf <= 1.0e-6f) continue;
-	//scol *= (std::fabs(pRay.dir*sp.N)/s.pdf);
-	// if surface color is black nothing to do!
-	//if(scol.isBlack()) continue;
-
-	ray.tmin = MIN_RAYDIST; //pRay.tmin = MIN_RAYDIST;
-	ray.tmax = -1.0; //pRay.tmax = -1.0;
-	// pRay.from = hit.P;
-	// pRay.dir = pwo;
-	//throughput = scol;
-
-	// if doesn't hit anything, return black color
-	if( !(did_hit = scene->intersect(ray, hit)) ) return pathCol;
-
-	p_mat = hit.material;
-	length = ray.tmax;
-	state.userdata = n_udat;
-	matBSDFs = p_mat->getFlags();
-	bool has_spec = matBSDFs & BSDF_SPECULAR;
-	bool caustic = false;
-	bool close = length < gatherDist;
-	bool do_bounce = close || has_spec;
-	// further bounces construct a path just as with path tracing:
-	/*for(int depth=0; depth<gatherBounces && do_bounce; ++depth)
-	{
-		//Y_INFO << depth << std::endl;
-		int d4 = 4*depth;
-		pwo = -pRay.dir;
-		p_mat->initBSDF(state, hit, matBSDFs);
-
-		if((matBSDFs & BSDF_VOLUMETRIC) && (vol=p_mat->getVolumeHandler(hit.N * pwo < 0)))
-		{
-			if(vol->transmittance(state, pRay, vcol)) throughput *= vcol;
-		}
-
-		if(matBSDFs & (BSDF_DIFFUSE))
-		{
-			if(close)
-			{
-				lcol = estimateOneDirectLight(state, hit, pwo, offs);
-			}
-			else if(caustic)
-			{
-				vector3d_t sf = FACE_FORWARD(hit.Ng, hit.N, pwo);
-				const photon_t *nearest = radianceMap.findNearest(hit.P, sf, lookupRad);
-				if(nearest) lcol = nearest->color();
-			}
-
-			if(close || caustic)
-			{
-				if(matBSDFs & BSDF_EMIT) lcol += p_mat->emit(state, hit, pwo);
-				pathCol += lcol*throughput;
-			}
-		}
-
-		s1 = scrHalton(d4+3, offs);
-		s2 = scrHalton(d4+4, offs);
-
-		if(state.rayDivision > 1)
-		{
-			s1 = addMod1(s1, state.dc1);
-			s2 = addMod1(s2, state.dc2);
-		}
-
-		sample_t sb(s1, s2, (close) ? BSDF_ALL : BSDF_ALL_SPECULAR | BSDF_FILTER);
-		scol = p_mat->sample(state, hit, pwo, pRay.dir, sb);
-
-		if( sb.pdf <= 1.0e-6f)
-		{
-			did_hit=false;
-			break;
-		}
-
-		scol *= (std::fabs(pRay.dir*hit.N)/sb.pdf);
-
-		pRay.tmin = MIN_RAYDIST;
-		pRay.tmax = -1.0;
-		pRay.from = hit.P;
-		throughput *= scol;
-		did_hit = scene->intersect(pRay, hit);
-
-		if(!did_hit) //hit background
-		{
-			if(caustic && background)
-			{
-				pathCol += throughput * (*background)(pRay, state);
-			}
-			break;
-		}
-
+	const material_t *p_mat;
+	color_t lcol;
+	ray.tmin = MIN_RAYDIST;
+	ray.tmax = -1.0;
+	if (scene->intersect(ray, hit)) {
 		p_mat = hit.material;
-		length += pRay.tmax;
-		caustic = (caustic || !depth) && (sb.sampledFlags & (BSDF_SPECULAR | BSDF_FILTER));
-		close =  length < gatherDist;
-		do_bounce = caustic || close;
-	}*/
-
-	if(did_hit)
-	{
+		state.userdata = n_udat;
+		matBSDFs = p_mat->getFlags();
 		p_mat->initBSDF(state, hit, matBSDFs);
 		if(matBSDFs & (BSDF_DIFFUSE | BSDF_GLOSSY))
 		{
-			vector3d_t sf = FACE_FORWARD(hit.Ng, hit.N, -ray.dir);//FACE_FORWARD(hit.Ng, hit.N, -pRay.dir);
+			vector3d_t sf = FACE_FORWARD(hit.Ng, hit.N, -ray.dir);
 			const photon_t *nearest = radianceMap.findNearest(hit.P, sf, lookupRad);
 			if(nearest) lcol = nearest->color();
 			// do we need to add the emited color?
-			if(matBSDFs & BSDF_EMIT) lcol += p_mat->emit(state, hit, -ray.dir);//-pRay.dir
-			pathCol += lcol * throughput;
+			//if(matBSDFs & BSDF_EMIT) lcol += p_mat->emit(state, hit, -ray.dir);
 		}
+	} else {
+		if (background) {
+			lcol = (*background)(ray, state, false);
+		}
+		ray.tmax = std::numeric_limits<float>::max();
 	}
 	state.userdata = first_udat;
-	return pathCol;
+	return lcol;
 }
 
 colorA_t photonIC_t::integrate(renderState_t &state, diffRay_t &ray) const
@@ -968,27 +854,40 @@ colorA_t photonIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 				// contribution of light emitting surfaces
 				if(bsdfs & BSDF_EMIT) col += material->emit(state, sp, wo);
 
-				if(bsdfs & BSDF_DIFFUSE)
+				/*if(bsdfs & BSDF_DIFFUSE)
 				{
 					col += estimateAllDirectLight(state, sp, wo);
+					col += finalIC(state, sp, wo);
+				}*/
+				if(bsdfs & BSDF_DIFFUSE)
+				{
+					// CREAR DIFERENCIAL SI NO TIENE! DARKTIDE STILE!
+					col += estimateAllDirectLight(state, sp, wo);
 					if (useIrradianceCache) {
-						if (ray.hasDifferentials) {
-							icRec_t icRecord(icMDivs, icKappa, sp); // M, Kappa
-							icRecord.setNup(wo);
-							icRecord.setPixelArea(ray);
-							if (!icTree->getIrradiance(icRecord)) {
-								setICRecord(state, ray, icRecord);
-								icTree->neighborClamp(icRecord);
-								icTree->add(icRecord);
-							}
-							col += icRecord.irr * M_1_PI *
-								   icRecord.material->eval(state, icRecord, wo, icRecord.getNup(), BSDF_DIFFUSE);
-						} else
-							Y_INFO << "NO DIFFERENTIALS!!!" << std::endl;
+						if (!ray.hasDifferentials) {
+							float dx = RI_vdC(state.pixelSample, state.samplingOffs);
+							float dy = RI_S(state.pixelSample, state.samplingOffs);
+							vector3d_t dU(0.f), dV(0.f);
+							createCS(ray.dir, dU, dV);
+							ray.xdir = (dx+1.f)*dU + dy*dV +ray.dir;
+							ray.xdir = dx*dU + (dy+1.f)*dV + ray.dir;
+							ray.hasDifferentials = true;
+						}
+						icRec_t icRecord(icMDivs, icKappa, sp); // M, Kappa
+						icRecord.setNup(wo);
+						icRecord.setPixelArea(ray);
+						if (!icTree->getIrradiance(icRecord)) {
+							setICRecord(state, ray, icRecord);
+							icTree->neighborClamp(icRecord);
+							icTree->add(icRecord);
+						}
+						col += icRecord.irr * M_1_PI *
+							   icRecord.material->eval(state, icRecord, wo, icRecord.getNup(), BSDF_DIFFUSE);
 					} else {
 						col += finalGathering(state, sp, wo);
 					}
 				}
+
 			}
 		}
 		else
@@ -1054,6 +953,7 @@ integrator_t* photonIC_t::factory(paraMap_t &params, renderEnvironment_t &render
 	bool do_IC=false;
 	int IC_M=10;
 	double IC_K=2.5;
+	bool IC_dump=false;
 
 	params.getParam("transpShad", transpShad);
 	params.getParam("shadowDepth", shadowDepth);
@@ -1076,6 +976,7 @@ integrator_t* photonIC_t::factory(paraMap_t &params, renderEnvironment_t &render
 	params.getParam("do_IC", do_IC);
 	params.getParam("IC_M_Divs", IC_M);
 	params.getParam("IC_Kappa", IC_K);
+	params.getParam("IC_dumpXML", IC_dump);
 
 	photonIC_t* ite = new photonIC_t(numPhotons, numCPhotons, transpShad, shadowDepth, dsRad, cRad);
 	ite->rDepth = raydepth;
@@ -1092,11 +993,198 @@ integrator_t* photonIC_t::factory(paraMap_t &params, renderEnvironment_t &render
 	ite->useIrradianceCache = do_IC;
 	ite->icMDivs = IC_M;
 	ite->icKappa = IC_K;
+	ite->icDumpXML = IC_dump;
 	return ite;
 }
 
 void photonIC_t::cleanup() {
-	icTree->saveToXml("dump.xml");
+	if (useIrradianceCache) {
+		if (icDumpXML)
+			icTree->saveToXml("dump.xml");
+		Y_INFO << "Total Records: " << icTree->getTotalRecords() << std::endl;
+		delete icTree;
+	}
+}
+
+color_t photonIC_t::finalIC(renderState_t &state, const surfacePoint_t &sp, const vector3d_t &wo) const
+{
+	color_t pathCol(0.0);
+	void *first_udat = state.userdata;
+	unsigned char userdata[USER_DATA_SIZE+7];
+	void *n_udat = (void *)( &userdata[7] - ( ((size_t)&userdata[7])&7 ) ); // pad userdata to 8 bytes
+	const volumeHandler_t *vol;
+	color_t vcol(0.f);
+	float dx = RI_vdC(state.pixelSample, state.samplingOffs);
+	float dy = RI_S(state.pixelSample, state.samplingOffs);
+
+	int nSampl = std::max(1, nPaths/state.rayDivision);
+	for(int i=0; i<nSampl; ++i)
+	{
+		color_t throughput( 1.0 );
+		PFLOAT length=0;
+		surfacePoint_t hit=sp;
+		vector3d_t pwo = wo;
+		diffRay_t pRay;
+		BSDF_t matBSDFs;
+		bool did_hit;
+		const material_t *p_mat = sp.material;
+		unsigned int offs = nPaths * state.pixelSample + state.samplingOffs + i; // some redundancy here...
+		color_t lcol, scol;
+		// "zero'th" FG bounce:
+		float s1 = RI_vdC(offs);
+		float s2 = scrHalton(2, offs);
+		if(state.rayDivision > 1)
+		{
+			s1 = addMod1(s1, state.dc1);
+			s2 = addMod1(s2, state.dc2);
+		}
+
+		sample_t s(s1, s2, BSDF_DIFFUSE|BSDF_REFLECT|BSDF_TRANSMIT); // glossy/dispersion/specular done via recursive raytracing
+		scol = p_mat->sample(state, hit, pwo, pRay.dir, s);
+
+		if(s.pdf <= 1.0e-6f) continue;
+		scol *= (std::fabs(pRay.dir*sp.N)/s.pdf);
+		if(scol.isBlack()) continue;
+
+		pRay.tmin = MIN_RAYDIST;
+		pRay.tmax = -1.0;
+		pRay.from = hit.P;
+		pRay.xfrom = hit.P;
+		pRay.yfrom = hit.P;
+		vector3d_t dU(0.f), dV(0.f);
+		createCS(pRay.dir, dU, dV);
+		pRay.xdir = (dx+1.f)*dU + dy*dV + pRay.dir;
+		pRay.xdir = dx*dU + (dy+1.f)*dV + pRay.dir;
+		pRay.hasDifferentials = true;
+		throughput = scol;
+
+		if( !(did_hit = scene->intersect(pRay, hit)) ) continue; //hit background
+
+		p_mat = hit.material;
+		length = pRay.tmax;
+		state.userdata = n_udat;
+		matBSDFs = p_mat->getFlags();
+		bool has_spec = matBSDFs & BSDF_SPECULAR;
+		bool caustic = false;
+		bool close = length < gatherDist;
+		bool do_bounce = close || has_spec;
+
+		spDifferentials_t spDiff(hit, pRay);
+
+		// further bounces construct a path just as with path tracing:
+		for(int depth=0; depth<gatherBounces && do_bounce; ++depth)
+		{
+			int d4 = 4*depth;
+			pwo = -pRay.dir;
+			p_mat->initBSDF(state, hit, matBSDFs);
+
+			if((matBSDFs & BSDF_VOLUMETRIC) && (vol=p_mat->getVolumeHandler(hit.N * pwo < 0)))
+			{
+				if(vol->transmittance(state, pRay, vcol)) throughput *= vcol;
+			}
+
+			if(matBSDFs & (BSDF_DIFFUSE))
+			{
+				if(close)
+				{
+					lcol = estimateOneDirectLight(state, hit, pwo, offs);
+				}
+				else if(caustic)
+				{
+					if (pRay.hasDifferentials)
+					{
+						icRec_t icRecord(icMDivs, icKappa, hit); // M, Kappa
+						icRecord.setNup(pwo);
+						icRecord.setPixelArea(pRay);
+						if (!icTree->getIrradiance(icRecord))
+						{
+							setICRecord(state, pRay, icRecord);
+							icTree->neighborClamp(icRecord);
+							icTree->add(icRecord);
+						}
+						lcol = icRecord.irr * M_1_PI * icRecord.material->eval(state, icRecord, pwo, icRecord.getNup(), BSDF_DIFFUSE);
+					}
+					else Y_INFO << "NO DIFFERENTIALS!!!" << std::endl;
+				}
+
+				if(close || caustic)
+				{
+					if(matBSDFs & BSDF_EMIT) lcol += p_mat->emit(state, hit, pwo);
+					pathCol += lcol*throughput;
+				}
+			}
+
+			s1 = scrHalton(d4+3, offs);
+			s2 = scrHalton(d4+4, offs);
+
+			if(state.rayDivision > 1)
+			{
+				s1 = addMod1(s1, state.dc1);
+				s2 = addMod1(s2, state.dc2);
+			}
+
+			sample_t sb(s1, s2, (close) ? BSDF_ALL : BSDF_ALL_SPECULAR | BSDF_FILTER);
+			scol = p_mat->sample(state, hit, pwo, pRay.dir, sb);
+
+			if( sb.pdf <= 1.0e-6f)
+			{
+				did_hit=false;
+				break;
+			}
+
+			scol *= (std::fabs(pRay.dir*hit.N)/sb.pdf);
+
+			pRay.tmin = MIN_RAYDIST;
+			pRay.tmax = -1.0;
+			pRay.from = hit.P;
+			throughput *= scol;
+			did_hit = scene->intersect(pRay, hit);
+
+			if(!did_hit) //hit background
+			{
+				if(caustic && background)
+				{
+					pathCol += throughput * (*background)(pRay, state);
+				}
+				break;
+			}
+
+			p_mat = hit.material;
+			length += pRay.tmax;
+			caustic = (caustic || !depth) && (sb.sampledFlags & (BSDF_SPECULAR | BSDF_FILTER));
+			close = length < gatherDist;
+			do_bounce = caustic || close;
+		}
+
+		if(did_hit)
+		{
+			p_mat->initBSDF(state, hit, matBSDFs);
+			if(matBSDFs & (BSDF_DIFFUSE | BSDF_GLOSSY))
+			{
+				if (pRay.hasDifferentials)
+				{
+					pRay.dir = -pRay.dir;
+					icRec_t icRecord(icMDivs, icKappa, hit); // M, Kappa
+					icRecord.setNup(pRay.dir);
+					icRecord.setPixelArea(pRay);
+					if (!icTree->getIrradiance(icRecord))
+					{
+						setICRecord(state, pRay, icRecord);
+						icTree->neighborClamp(icRecord);
+						icTree->add(icRecord);
+					}
+					lcol = icRecord.irr * M_1_PI * icRecord.material->eval(state, icRecord, pRay.dir, icRecord.getNup(), BSDF_DIFFUSE);
+				}
+				else Y_INFO << "NO DIFFERENTIALS!!!" << std::endl;
+
+				if(matBSDFs & BSDF_EMIT) lcol += p_mat->emit(state, hit, -pRay.dir);
+
+				pathCol += lcol * throughput;
+			}
+		}
+		state.userdata = first_udat;
+	}
+	return pathCol / (float)nSampl;
 }
 
 extern "C"

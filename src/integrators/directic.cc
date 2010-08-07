@@ -38,6 +38,7 @@ public:
 	virtual bool preprocess();
 	virtual color_t getRadiance(renderState_t &state, ray_t &ray) const;
 	virtual colorA_t integrate(renderState_t &state, diffRay_t &ray) const;
+	virtual void cleanup();
 	static integrator_t* factory(paraMap_t &params, renderEnvironment_t &render);
 };
 
@@ -93,7 +94,7 @@ bool directIC_t::preprocess()
 	// setup cache tree
 	if(useIrradianceCache)
 	{
-		icTree = new icTree_t(scene->getSceneBound(), 16);
+		icTree = new icTree_t(scene->getSceneBound(), 10);
 	}
 
 	return success;
@@ -237,6 +238,10 @@ integrator_t* directIC_t::factory(paraMap_t &params, renderEnvironment_t &render
 	inte->icMDivs = IC_M;
 	inte->icKappa = IC_K;
 	return inte;
+}
+
+void directIC_t::cleanup() {
+	icTree->saveToXml("dump.xml");
 }
 
 extern "C"

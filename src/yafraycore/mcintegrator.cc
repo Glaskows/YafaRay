@@ -629,8 +629,8 @@ color_t mcIntegrator_t::sampleAmbientOcclusion(renderState_t &state, const surfa
 }
 
 void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &record) const {
-	if (!ray.hasDifferentials)
-		Y_INFO << "ERROR: ray from mcIntegrator_t::createNewICRecord() should have differentials" << std::endl;
+	//if (!ray.hasDifferentials)
+	//	Y_INFO << "ERROR: ray from mcIntegrator_t::createNewICRecord() should have differentials" << std::endl;
 	float oldRayLength[record.getM()];
 	color_t oldRad[record.getM()];
 	// we set the projected pixel area on the surface point
@@ -648,7 +648,7 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 		for (int j=0; j<record.getM(); j++) {
 			// Calculate each incoming radiance of hemisphere at point icRecord
 			sRay.dir = record.getSampleHemisphere(j, k);
-			radiance = getRadiance(state, sRay);
+			radiance = getRadiance(state, record, sRay);
 			//radiance = getRadiance(state, record, sRay.dir);
 			// note: oldRad[j] and oldRayLength[j] means L_j,k-1 and r_j,k-1 respectively
 			//       oldRad[j-1] and oldRayLength[j-1] means L_j-1,k and r_j-1,k respectively
@@ -705,7 +705,8 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 	}
 	// HEURISTICS
 	record.clampRbyGradient();
-	record.clampRbyScreenSpace();
+	if (ray.hasDifferentials)
+		record.clampRbyScreenSpace();
 	record.clampGradient();
 }
 

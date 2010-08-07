@@ -99,6 +99,7 @@ class YAFRAYCORE_EXPORT mcIntegrator_t: public tiledIntegrator_t
 		icTree_t *icTree; //! contains a pointer to an Irradiance Cache's tree
 		int icMDivs; //! number of subdivision on stratified hemisphere along theta
 		float icKappa; //! controls the overall density of IC records
+		bool icDumpXML; //! true if you want to have a file with the IC tree information (it may be big)
 };
 
 __END_YAFRAY

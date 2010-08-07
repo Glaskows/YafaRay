@@ -137,6 +137,7 @@ void icTree_t::add(const icRec_t &rec) {
 	recursiveAdd(&root, treeBound, rec, bound,
 				 2*rec.getRadius()*M_SQRT3 ); // 2*r*sqrt(3) = (bound.a - bound.g).length
 	lock.unlock();
+	totalRecords++;
 }
 
 bool icTree_t::icLookup_t::operator()(const point3d_t &p, const icRec_t &sample) { // point p isn't used
@@ -264,7 +265,6 @@ void icTree_t::saveToXml(const std::string &fileName) {
 										   "%f,%f,%f", treeBound.a.x, treeBound.a.y, treeBound.a.z );
 	xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "boundMax",
 										   "%f,%f,%f", treeBound.g.x, treeBound.g.y, treeBound.g.z );
-
 	octNode_t<icRec_t> *nodes[maxDepth+1];
 	int sibling[maxDepth+1];
 	int level = 0;
