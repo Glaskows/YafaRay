@@ -34,7 +34,7 @@ __BEGIN_YAFRAY
 
 // stratifiedHemisphere METHODS
 // ***********************************************************************
-		stratifiedHemisphere::stratifiedHemisphere(int nm):M(nm), N(M_PI * M), rnd((unsigned)time(0)) {
+		stratifiedHemisphere::stratifiedHemisphere(int nm):M(nm), N(M_PI * M), rnd((unsigned)time(0)/*1*/) {
 	vk = new vector3d_t[N];
 	vkMinus = new vector3d_t[N];
 	uk = new vector3d_t[N];
@@ -141,6 +141,10 @@ void stratifiedHemisphere::calcCosThetaPluses() {
 
 // icREC_t METHODS
 // ***********************************************************************
+
+const float icRec_t::NORMALIZATION_TERM = 8.113140441;
+
+
 //! number of total sections are nSamples = pi*m^2
 icRec_t::icRec_t(float kappa, stratifiedHemisphere *strat):
 		stratHemi(strat), kappa(kappa) {

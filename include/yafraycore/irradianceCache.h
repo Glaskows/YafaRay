@@ -65,8 +65,8 @@ struct stratifiedHemisphere {
 	float getCosThetaMinus(int j) const { return cosThetaMinus[j]; }
 	float getCosThetaPlus(int j) const { return cosThetaPlus[j]; }
 
-	int M; //!< number of divisions along theta
-	int N; //!< number of divisions along phi
+	const int M; //!< number of divisions along theta
+	const int N; //!< number of divisions along phi
 private:
 	void calcVks();
 	void calcVkMinuses();
@@ -125,7 +125,7 @@ struct icRec_t : public surfacePoint_t
 	// ToDo: add rotation and translation gradients
 	// ToDo: add distance to surfaces, minimum and maximum spacing threshold (for neighbor clamping)
 	// ToDo: adaptative sampling
-	static const float NORMALIZATION_TERM = 8.113140441; //!< from T&L weight function normalization term 1/sqrt(1-cos10°) for 10°
+	static const float NORMALIZATION_TERM; //!< from T&L weight function normalization term 1/sqrt(1-cos10°) for 10°
 private:
 	float			rClamp; //!< radius clamped by projected pixel area and gradients
 	vector3d_t		Nup; //!< normal vector on the side of the hitting ray
