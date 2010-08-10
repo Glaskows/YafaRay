@@ -631,8 +631,8 @@ color_t mcIntegrator_t::sampleAmbientOcclusion(renderState_t &state, const surfa
 void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &record) const {
 	//if (!ray.hasDifferentials)
 	//	Y_INFO << "ERROR: ray from mcIntegrator_t::createNewICRecord() should have differentials" << std::endl;
-	float oldRayLength[record.getM()];
-	color_t oldRad[record.getM()];
+	std::vector<float> oldRayLength(record.getM());
+	std::vector<color_t> oldRad(record.getM());
 	// we set the projected pixel area on the surface point
 	record.setPixelArea(ray);
 	ray_t sRay; // ray from hitpoint to hemisphere sample direction
@@ -658,12 +658,12 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 					float cosThetaMin = record.stratHemi->getCosThetaMinus(j);
 					innerTransValuesU +=
 							( (cosThetaMin*cosThetaMin) * (radiance - oldRad[j-1]) )/
-							(fmin(sRay.tmax, oldRayLength[j-1])) ;
+							(std::min(sRay.tmax, oldRayLength[j-1])) ;
 					// cos(theta_j)[cos(theta_j-) - cos(theta_j+)] * (L_j,k - L_j,k-1) / [sin(theta_j,k) * min(r_j,k , r_j-1,k)]
 					innerTransValuesV +=
 							( record.stratHemi->getCosTheta(j) * (cosThetaMin - record.stratHemi->getCosThetaPlus(j)) *
 								(radiance - oldRad[j]) ) /
-							(record.stratHemi->getSinTheta(j) * fmin(sRay.tmax, oldRayLength[j]));
+							(record.stratHemi->getSinTheta(j) * std::min(sRay.tmax, oldRayLength[j]));
 				}
 			}
 			record.irr += radiance;
