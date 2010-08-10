@@ -34,6 +34,39 @@ __BEGIN_YAFRAY
 
 // stratifiedHemisphere METHODS
 // ***********************************************************************
+		stratifiedHemisphere::stratifiedHemisphere(int nm):M(nm), N(M_PI * M), rnd((unsigned)time(0)) {
+	vk = new vector3d_t[N];
+	vkMinus = new vector3d_t[N];
+	uk = new vector3d_t[N];
+	tanTheta = new float[M];
+	sinTheta = new float[M];
+	sinThetaMinus = new float[M];
+	cosTheta = new float[M];
+	cosThetaMinus = new float[M];
+	cosThetaPlus = new float[M];
+
+	calcSinThetas();
+	calcCosThetas();
+	calcTanThetas();
+	calcSinThetaMinuses();
+	calcCosThetaMinuses();
+	calcCosThetaPluses();
+	calcVks();
+	calcUks();
+	calcVkMinuses();
+}
+
+stratifiedHemisphere::~stratifiedHemisphere() {
+	delete vk;
+	delete vkMinus;
+	delete uk;
+	delete tanTheta;
+	delete sinTheta;
+	delete sinThetaMinus;
+	delete cosTheta;
+	delete cosThetaMinus;
+	delete cosThetaPlus;
+}
 
 vector3d_t stratifiedHemisphere::getDirection(int j, int k) {
 	if (j<0 || j>M || k<0 || k>N)
@@ -48,19 +81,79 @@ vector3d_t stratifiedHemisphere::getDirection(int j, int k) {
 					  fSqrt(1 - tmp));
 }
 
+void stratifiedHemisphere::calcUks() {
+	for (int k=0; k<N; k++) {
+		float phi = M_2PI * ((float)k + 0.5f) / (float)N;
+		uk[k] = vector3d_t(fCos(phi), fSin(phi), 0.f);
+	}
+}
+
+void stratifiedHemisphere::calcVks() {
+	for (int k=0; k<N; k++) {
+		float phi = M_2PI * ((float)k + 0.5f) / (float)N;
+		vk[k] = vector3d_t(-fSin(phi), fCos(phi), 0.f);
+	}
+}
+
+void stratifiedHemisphere::calcVkMinuses() {
+	for (int k=0; k<N; k++) {
+		float phi = M_2PI * (float)k / (float)N;
+		vkMinus[k] = vector3d_t(-fSin(phi), fCos(phi), 0.f);
+	}
+}
+
+void stratifiedHemisphere::calcTanThetas() {
+	for (int j=0; j<M; j++) {
+		tanTheta[j] = fSqrt( ((float)j+0.5f) / ((float)M - (float)j - 0.5) );
+	}
+	// fTan(fAsin( fSqrt( ((float)j+0.5f) / (float) M ) ));
+}
+
+void stratifiedHemisphere::calcSinThetas() {
+	for (int j=0; j<M; j++) {
+		sinTheta[j] = fSqrt( ((float)j + 0.5f) / (float)M );
+	}
+}
+
+void stratifiedHemisphere::calcSinThetaMinuses() {
+	for (int j=0; j<M; j++) {
+		sinThetaMinus[j] = fSqrt( (float)j / (float)M );
+	}
+}
+
+void stratifiedHemisphere::calcCosThetas() {
+	for (int j=0; j<M; j++) {
+		cosTheta[j] = fSqrt( 1.0f - ((float)j + 0.5f) / (float)M );
+	}
+}
+
+void stratifiedHemisphere::calcCosThetaMinuses() {
+	for (int j=0; j<M; j++) {
+		cosThetaMinus[j] = fSqrt( 1.0f - (float)j / (float)M );
+	}
+}
+
+void stratifiedHemisphere::calcCosThetaPluses() {
+	for (int j=0; j<M; j++) {
+		cosThetaPlus[j] = fSqrt( 1.0f - ((float)j + 1.0f) / (float)M );
+	}
+}
+
 // icREC_t METHODS
 // ***********************************************************************
 //! number of total sections are nSamples = pi*m^2
-icRec_t::icRec_t(int m, float kappa):stratHemi(m), kappa(kappa) {
+icRec_t::icRec_t(float kappa, stratifiedHemisphere *strat):
+		stratHemi(strat), kappa(kappa) {
 	r = std::numeric_limits<float>::max();
 }
 
-icRec_t::icRec_t(int m, float kappa, const surfacePoint_t &sp):surfacePoint_t(sp), stratHemi(m), kappa(kappa) {
+icRec_t::icRec_t(float kappa, const surfacePoint_t &sp, stratifiedHemisphere *strat):
+		surfacePoint_t(sp), stratHemi(strat), kappa(kappa) {
 	r = std::numeric_limits<float>::max();
 }
 
 vector3d_t icRec_t::getSampleHemisphere(int j, int k) {
-	return changeBasis( stratHemi.getDirection(j, k), NU, NV, Nup );
+	return changeBasis( stratHemi->getDirection(j, k), NU, NV, Nup );
 }
 
 void icRec_t::changeSampleRadius(float newr) {
@@ -99,7 +192,7 @@ void icRec_t::setNup(const vector3d_t &wo) {
 
 bool icRec_t::inFront(const icRec_t &record) const {
 	float di = (P - record.P) * ((Nup + record.getNup() )/2.0f);
-	if (di < -0.01f) // small negative value, ¿it works?
+	if (di < -0.001f) // small negative value, ¿it works?
 		return true;
 	return false;
 }

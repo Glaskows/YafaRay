@@ -94,7 +94,7 @@ bool directIC_t::preprocess()
 	// setup cache tree
 	if(useIrradianceCache)
 	{
-		icTree = new icTree_t(scene->getSceneBound(), 10);
+		icTree = new icTree_t(scene->getSceneBound(), 10, icMDivs);
 	}
 
 	return success;
@@ -163,7 +163,7 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 			// check for an interpolated result
 			if (useIrradianceCache) {
 				if (ray.hasDifferentials) {
-					icRec_t icRecord(icMDivs, icKappa, sp); // M, Kappa
+					icRec_t icRecord(icKappa, sp, &(icTree->stratHemi) ); // M, Kappa
 					icRecord.setNup(wo);
 					icRecord.setPixelArea(ray);
 					if (!icTree->getIrradiance(icRecord)) {

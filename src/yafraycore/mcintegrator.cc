@@ -655,15 +655,15 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 			if (k>0) {
 				if (j>0) {
 					// cos2(theta_j-)sin(theta_j-) * (L_j,k - L_j-1,k) / min(r_j,k , r_j-1,k)
-					float cosThetaMin = record.stratHemi.getCosThetaMinus(j);
+					float cosThetaMin = record.stratHemi->getCosThetaMinus(j);
 					innerTransValuesU +=
 							( (cosThetaMin*cosThetaMin) * (radiance - oldRad[j-1]) )/
 							(fmin(sRay.tmax, oldRayLength[j-1])) ;
 					// cos(theta_j)[cos(theta_j-) - cos(theta_j+)] * (L_j,k - L_j,k-1) / [sin(theta_j,k) * min(r_j,k , r_j-1,k)]
 					innerTransValuesV +=
-							( record.stratHemi.getCosTheta(j) * (cosThetaMin - record.stratHemi.getCosThetaPlus(j)) *
+							( record.stratHemi->getCosTheta(j) * (cosThetaMin - record.stratHemi->getCosThetaPlus(j)) *
 								(radiance - oldRad[j]) ) /
-							(record.stratHemi.getSinTheta(j) * fmin(sRay.tmax, oldRayLength[j]));
+							(record.stratHemi->getSinTheta(j) * fmin(sRay.tmax, oldRayLength[j]));
 				}
 			}
 			record.irr += radiance;
@@ -671,14 +671,14 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 			// copy new rays and irradiance values over old ones
 			oldRad[j] = radiance;
 			oldRayLength[j] = sRay.tmax;
-			innerRotValues -= record.stratHemi.getTanTheta(j) * radiance;
+			innerRotValues -= record.stratHemi->getTanTheta(j) * radiance;
 		}
-		vector3d_t vk(record.stratHemi.getVk(k));
+		const vector3d_t &vk = record.stratHemi->getVk(k);
 		record.rotGrad[0] += vk * innerRotValues.R;
 		record.rotGrad[1] += vk * innerRotValues.G;
 		record.rotGrad[2] += vk * innerRotValues.B;
-		vector3d_t uk(record.stratHemi.getUk(k));
-		vector3d_t vkm(record.stratHemi.getVkMinus(k));
+		const vector3d_t &uk = record.stratHemi->getUk(k);
+		const vector3d_t &vkm = record.stratHemi->getVkMinus(k);
 		record.transGrad[0] +=
 				( (innerTransValuesU.R * M_2PI / (float)record.getN() ) * uk ) +
 				( innerTransValuesV.R * vkm );

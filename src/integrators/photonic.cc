@@ -624,7 +624,7 @@ bool photonIC_t::preprocess()
 	// setup cache tree
 	if(useIrradianceCache)
 	{
-		icTree = new icTree_t(scene->getSceneBound(), 16);
+		icTree = new icTree_t(scene->getSceneBound(), 16, icMDivs);
 	}
 
 	return true;
@@ -873,7 +873,7 @@ colorA_t photonIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 							ray.xdir = dx*dU + (dy+1.f)*dV + ray.dir;
 							ray.hasDifferentials = true;
 						}
-						icRec_t icRecord(icMDivs, icKappa, sp); // M, Kappa
+						icRec_t icRecord(icKappa, sp, &(icTree->stratHemi) ); // M, Kappa
 						icRecord.setNup(wo);
 						icRecord.setPixelArea(ray);
 						if (!icTree->getIrradiance(icRecord)) {
@@ -1002,7 +1002,6 @@ void photonIC_t::cleanup() {
 		if (icDumpXML)
 			icTree->saveToXml("dump.xml");
 		Y_INFO << "Total Records: " << icTree->getTotalRecords() << std::endl;
-		delete icTree;
 	}
 }
 
@@ -1093,7 +1092,7 @@ color_t photonIC_t::finalIC(renderState_t &state, const surfacePoint_t &sp, cons
 				{
 					if (pRay.hasDifferentials)
 					{
-						icRec_t icRecord(icMDivs, icKappa, hit); // M, Kappa
+						icRec_t icRecord(icKappa, hit, &(icTree->stratHemi) ); // M, Kappa
 						icRecord.setNup(pwo);
 						icRecord.setPixelArea(pRay);
 						if (!icTree->getIrradiance(icRecord))
@@ -1164,7 +1163,7 @@ color_t photonIC_t::finalIC(renderState_t &state, const surfacePoint_t &sp, cons
 				if (pRay.hasDifferentials)
 				{
 					pRay.dir = -pRay.dir;
-					icRec_t icRecord(icMDivs, icKappa, hit); // M, Kappa
+					icRec_t icRecord(icKappa, hit, &(icTree->stratHemi) ); // M, Kappa
 					icRecord.setNup(pRay.dir);
 					icRecord.setPixelArea(pRay);
 					if (!icTree->getIrradiance(icRecord))
