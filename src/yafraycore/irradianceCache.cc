@@ -175,7 +175,7 @@ float icRec_t::getWeight(const icRec_t &record) const {
 	}
 	float epNor = fSqrt(1.f - dot) * NORMALIZATION_TERM;
 	float epPos = (P - record.P).length() * 2.f / rClamp;
-	float weight = 1.f - kappa * fmax(epPos, epNor);
+	float weight = 1.f - kappa * std::max(epPos, epNor);
 	return weight;
 }
 

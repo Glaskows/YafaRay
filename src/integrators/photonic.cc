@@ -624,7 +624,7 @@ bool photonIC_t::preprocess()
 	// setup cache tree
 	if(useIrradianceCache)
 	{
-		icTree = new icTree_t(scene->getSceneBound(), 16, icMDivs);
+		icTree = new icTree_t(scene->getSceneBound(), 18, icMDivs);
 	}
 
 	return true;
@@ -976,7 +976,7 @@ integrator_t* photonIC_t::factory(paraMap_t &params, renderEnvironment_t &render
 	params.getParam("do_IC", do_IC);
 	params.getParam("IC_M_Divs", IC_M);
 	params.getParam("IC_Kappa", IC_K);
-	params.getParam("IC_dumpXML", IC_dump);
+	params.getParam("IC_DumpXML", IC_dump);
 
 	photonIC_t* ite = new photonIC_t(numPhotons, numCPhotons, transpShad, shadowDepth, dsRad, cRad);
 	ite->rDepth = raydepth;
