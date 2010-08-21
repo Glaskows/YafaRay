@@ -629,10 +629,10 @@ color_t mcIntegrator_t::sampleAmbientOcclusion(renderState_t &state, const surfa
 }
 
 void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &record) const {
-	//if (!ray.hasDifferentials)
-	//	Y_INFO << "ERROR: ray from mcIntegrator_t::createNewICRecord() should have differentials" << std::endl;
-	std::vector<float> oldRayLength(record.getM());
-	std::vector<color_t> oldRad(record.getM());
+	if (!ray.hasDifferentials)
+		Y_INFO << "ERROR: ray from mcIntegrator_t::createNewICRecord() should have differentials" << std::endl;
+	float oldRayLength[record.getM()];
+	color_t oldRad[record.getM()];
 	// we set the projected pixel area on the surface point
 	record.setPixelArea(ray);
 	ray_t sRay; // ray from hitpoint to hemisphere sample direction
@@ -648,8 +648,7 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 		for (int j=0; j<record.getM(); j++) {
 			// Calculate each incoming radiance of hemisphere at point icRecord
 			sRay.dir = record.getSampleHemisphere(j, k);
-			radiance = getRadiance(state, record, sRay);
-			//radiance = getRadiance(state, record, sRay.dir);
+			radiance = getRadiance(state, sRay);
 			// note: oldRad[j] and oldRayLength[j] means L_j,k-1 and r_j,k-1 respectively
 			//       oldRad[j-1] and oldRayLength[j-1] means L_j-1,k and r_j-1,k respectively
 			if (k>0) {
@@ -658,12 +657,12 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 					float cosThetaMin = record.stratHemi->getCosThetaMinus(j);
 					innerTransValuesU +=
 							( (cosThetaMin*cosThetaMin) * (radiance - oldRad[j-1]) )/
-							(std::min(sRay.tmax, oldRayLength[j-1])) ;
+							(fmin(sRay.tmax, oldRayLength[j-1])) ;
 					// cos(theta_j)[cos(theta_j-) - cos(theta_j+)] * (L_j,k - L_j,k-1) / [sin(theta_j,k) * min(r_j,k , r_j-1,k)]
 					innerTransValuesV +=
 							( record.stratHemi->getCosTheta(j) * (cosThetaMin - record.stratHemi->getCosThetaPlus(j)) *
 								(radiance - oldRad[j]) ) /
-							(record.stratHemi->getSinTheta(j) * std::min(sRay.tmax, oldRayLength[j]));
+							(record.stratHemi->getSinTheta(j) * fmin(sRay.tmax, oldRayLength[j]));
 				}
 			}
 			record.irr += radiance;
@@ -673,12 +672,12 @@ void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &
 			oldRayLength[j] = sRay.tmax;
 			innerRotValues -= record.stratHemi->getTanTheta(j) * radiance;
 		}
-		const vector3d_t &vk = record.stratHemi->getVk(k);
+		vector3d_t vk(record.stratHemi->getVk(k));
 		record.rotGrad[0] += vk * innerRotValues.R;
 		record.rotGrad[1] += vk * innerRotValues.G;
 		record.rotGrad[2] += vk * innerRotValues.B;
-		const vector3d_t &uk = record.stratHemi->getUk(k);
-		const vector3d_t &vkm = record.stratHemi->getVkMinus(k);
+		vector3d_t uk(record.stratHemi->getUk(k));
+		vector3d_t vkm(record.stratHemi->getVkMinus(k));
 		record.transGrad[0] +=
 				( (innerTransValuesU.R * M_2PI / (float)record.getN() ) * uk ) +
 				( innerTransValuesV.R * vkm );

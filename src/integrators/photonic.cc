@@ -777,13 +777,12 @@ color_t photonIC_t::finalGathering(renderState_t &state, const surfacePoint_t &s
 	return pathCol / (float)nSampl;
 }
 
-color_t photonIC_t::getRadiance(renderState_t &state, surfacePoint_t &sp, ray_t &ray) const //surfacePoint_t &sp, vector3d_t &wo) const
+color_t photonIC_t::getRadiance(renderState_t &state, ray_t &ray) const
 {
-	color_t pathCol(0.0);
 	void *first_udat = state.userdata;
 	unsigned char userdata[USER_DATA_SIZE+7];
 	void *n_udat = (void *)( &userdata[7] - ( ((size_t)&userdata[7])&7 ) ); // pad userdata to 8 bytes
-	surfacePoint_t hit = sp;
+	surfacePoint_t hit;
 	BSDF_t matBSDFs;
 	const material_t *p_mat;
 	color_t lcol;
@@ -799,13 +798,8 @@ color_t photonIC_t::getRadiance(renderState_t &state, surfacePoint_t &sp, ray_t 
 			vector3d_t sf = FACE_FORWARD(hit.Ng, hit.N, -ray.dir);
 			const photon_t *nearest = radianceMap.findNearest(hit.P, sf, lookupRad);
 			if(nearest) lcol = nearest->color();
-			// do we need to add the emited color?
-			//if(matBSDFs & BSDF_EMIT) lcol += p_mat->emit(state, hit, -ray.dir);
 		}
 	} else {
-		if (background) {
-			lcol = (*background)(ray, state, false);
-		}
 		ray.tmax = std::numeric_limits<float>::max();
 	}
 	state.userdata = first_udat;
@@ -1002,6 +996,7 @@ void photonIC_t::cleanup() {
 		if (icDumpXML)
 			icTree->saveToXml("dump.xml");
 		Y_INFO << "Total Records: " << icTree->getTotalRecords() << std::endl;
+		delete icTree;
 	}
 }
 

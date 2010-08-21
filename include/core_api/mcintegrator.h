@@ -54,15 +54,6 @@ class YAFRAYCORE_EXPORT mcIntegrator_t: public tiledIntegrator_t
 			color_t color;
 			return color;
 		}
-		virtual color_t getRadiance(renderState_t &state, surfacePoint_t &sp, ray_t &ray) const {
-			color_t color;
-			return color;
-		}
-		virtual color_t getRadiance(renderState_t &state, surfacePoint_t &sp, vector3d_t &wo) const {
-			color_t color;
-			return color;
-		}
-
 		/*! Creates a new irradiance cache's record for a given point
 		  \param state current state of scene rendering
 		  \param ray ray that hits the surface where the icRecord will be created

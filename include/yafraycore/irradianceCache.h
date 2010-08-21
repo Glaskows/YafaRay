@@ -52,22 +52,29 @@ inline vector3d_t changeBasis(const vector3d_t &vec, const vector3d_t &nx, const
   */
 struct stratifiedHemisphere {
 	stratifiedHemisphere(int nm);
+	stratifiedHemisphere(const stratifiedHemisphere &strat);
 	~stratifiedHemisphere();
 
-	vector3d_t getDirection(int j, int k); //!< get random direction sample from section j,k in local coordinate system
-	const vector3d_t &getVk(int k) const { return vk[k]; } //!< get vector v_k: base-plane vector in the direction (pi/2, phi_k + pi/2)
-	const vector3d_t &getVkMinus(int k) const { return vkMinus[k]; } //!< get vector v_k: base-plane vector in the direction (pi/2, phi_k + pi/2)
-	const vector3d_t &getUk(int k) const { return uk[k]; } //!< get vector u_k: base-plane vector in the direction (pi/2, phi_k)
-	float getTanTheta(int j) const { return tanTheta[j]; } //!< get tan(theta_j)
-	float getSinTheta(int j) const { return sinTheta[j]; }
-	float getSinThetaMinus(int j) const { return sinThetaMinus[j]; }
-	float getCosTheta(int j) const { return cosTheta[j]; }
-	float getCosThetaMinus(int j) const { return cosThetaMinus[j]; }
-	float getCosThetaPlus(int j) const { return cosThetaPlus[j]; }
+	stratifiedHemisphere &operator=(const stratifiedHemisphere &strat);
 
-	const int M; //!< number of divisions along theta
-	const int N; //!< number of divisions along phi
+	vector3d_t getDirection(int j, int k); //!< get random direction sample from section j,k in local coordinate system
+	vector3d_t getDirection(int j, int k, float s1, float s2); //!< get random direction sample from section j,k in local coordinate system
+	inline const vector3d_t &getVk(int k) const { return vk[k]; } //!< get vector v_k: base-plane vector in the direction (pi/2, phi_k + pi/2)
+	inline const vector3d_t &getVkMinus(int k) const { return vkMinus[k]; } //!< get vector v_k: base-plane vector in the direction (pi/2, phi_k + pi/2)
+	inline const vector3d_t &getUk(int k) const { return uk[k]; } //!< get vector u_k: base-plane vector in the direction (pi/2, phi_k)
+	inline float getTanTheta(int j) const { return tanTheta[j]; } //!< get tan(theta_j)
+	inline float getSinTheta(int j) const { return sinTheta[j]; }
+	inline float getSinThetaMinus(int j) const { return sinThetaMinus[j]; }
+	inline float getCosTheta(int j) const { return cosTheta[j]; }
+	inline float getCosThetaMinus(int j) const { return cosThetaMinus[j]; }
+	inline float getCosThetaPlus(int j) const { return cosThetaPlus[j]; }
+	inline int getM() const { return M; }
+	inline int getN() const { return N; }
+
 private:
+	int M; //!< number of divisions along theta
+	int N; //!< number of divisions along phi
+
 	void calcVks();
 	void calcVkMinuses();
 	void calcUks();
@@ -87,7 +94,7 @@ private:
 	float *cosTheta;
 	float *cosThetaMinus;
 	float *cosThetaPlus;
-	random_t rnd; //!< random number generator. ToDo: change seeds!
+	random_t rnd; //!< random number generator
 };
 
 
@@ -98,11 +105,12 @@ struct icRec_t : public surfacePoint_t
 	icRec_t(float kappa, const surfacePoint_t &sp, stratifiedHemisphere *strat);
 	// METHODS
 	vector3d_t		getSampleHemisphere(int j, int k); //!< compute indirect light with direct lighting of first bounce
+	vector3d_t		getSampleHemisphere(int j, int k, float s1, float s2); //!< compute indirect light with direct lighting of first bounce
 	float			getWeight(const icRec_t &record) const;
 	inline float	getRadius() const { return rClamp; } //!< return the radius of the sample "action" area
 	bound_t			getBound() const; //!< get the bounding box of the sample sphere
-	int				getM() const { return stratHemi->M; } //!< return the number of division if hemisphere along theta
-	int				getN() const { return stratHemi->N; } //!< return the number of division if hemisphere along phi
+	inline int		getM() const { return stratHemi->getM(); } //!< return the number of division if hemisphere along theta
+	inline int		getN() const { return stratHemi->getN(); } //!< return the number of division if hemisphere along phi
 	void			changeSampleRadius(float newr); //!< change radius if it is a new minimum
 	void			setPixelArea(const diffRay_t &dir); //!< calculates the projected pixel area on the surface position of the sample
 	void			setNup(const vector3d_t &wo);
@@ -122,8 +130,6 @@ struct icRec_t : public surfacePoint_t
 	float			rMin; //!< min radius based on screen space (1-3 times projected pixel area)
 	float			rMax; //!< max radius based on screen space (20 times projected pixel area)
 	float			rNeighbor; //!< saves the neighbor clamped radius
-	// ToDo: add rotation and translation gradients
-	// ToDo: add distance to surfaces, minimum and maximum spacing threshold (for neighbor clamping)
 	// ToDo: adaptative sampling
 	static const float NORMALIZATION_TERM; //!< from T&L weight function normalization term 1/sqrt(1-cos10°) for 10°
 private:

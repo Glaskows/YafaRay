@@ -34,7 +34,7 @@ __BEGIN_YAFRAY
 
 // stratifiedHemisphere METHODS
 // ***********************************************************************
-		stratifiedHemisphere::stratifiedHemisphere(int nm):M(nm), N(M_PI * M), rnd((unsigned)time(0)/*1*/) {
+stratifiedHemisphere::stratifiedHemisphere(int nm):M(nm), N(M_PI * M), rnd(time(0)) {
 	vk = new vector3d_t[N];
 	vkMinus = new vector3d_t[N];
 	uk = new vector3d_t[N];
@@ -56,24 +56,101 @@ __BEGIN_YAFRAY
 	calcVkMinuses();
 }
 
+stratifiedHemisphere::stratifiedHemisphere(const stratifiedHemisphere &strat): rnd(time(0)) {
+	if (this != &strat) {
+		if (&strat == NULL) {
+			M = N = 0;
+		} else {
+			M = strat.getM();
+			N = strat.getN();
+			vk = new vector3d_t[N];
+			vkMinus = new vector3d_t[N];
+			uk = new vector3d_t[N];
+			tanTheta = new float[M];
+			sinTheta = new float[M];
+			sinThetaMinus = new float[M];
+			cosTheta = new float[M];
+			cosThetaMinus = new float[M];
+			cosThetaPlus = new float[M];
+			calcSinThetas();
+			calcCosThetas();
+			calcTanThetas();
+			calcSinThetaMinuses();
+			calcCosThetaMinuses();
+			calcCosThetaPluses();
+			calcVks();
+			calcUks();
+			calcVkMinuses();
+		}
+	}
+}
+
 stratifiedHemisphere::~stratifiedHemisphere() {
-	delete vk;
-	delete vkMinus;
-	delete uk;
-	delete tanTheta;
-	delete sinTheta;
-	delete sinThetaMinus;
-	delete cosTheta;
-	delete cosThetaMinus;
-	delete cosThetaPlus;
+	delete[] vk;
+	delete[] vkMinus;
+	delete[] uk;
+	delete[] tanTheta;
+	delete[] sinTheta;
+	delete[] sinThetaMinus;
+	delete[] cosTheta;
+	delete[] cosThetaMinus;
+	delete[] cosThetaPlus;
+}
+
+stratifiedHemisphere & stratifiedHemisphere::operator=(const stratifiedHemisphere &strat) {
+	if (&strat != NULL && this != &strat) {
+		if (M != strat.getM()) {
+			M = strat.getM();
+			delete tanTheta;
+			delete sinTheta;
+			delete sinThetaMinus;
+			delete cosTheta;
+			delete cosThetaMinus;
+			delete cosThetaPlus;
+			tanTheta = new float[M];
+			sinTheta = new float[M];
+			sinThetaMinus = new float[M];
+			cosTheta = new float[M];
+			cosThetaMinus = new float[M];
+			cosThetaPlus = new float[M];
+			calcSinThetas();
+			calcCosThetas();
+			calcTanThetas();
+			calcSinThetaMinuses();
+			calcCosThetaMinuses();
+			calcCosThetaPluses();
+		}
+		if (N != strat.getN()) {
+			N = strat.getN();
+			delete vk;
+			delete vkMinus;
+			delete uk;
+			vk = new vector3d_t[N];
+			vkMinus = new vector3d_t[N];
+			uk = new vector3d_t[N];
+			calcVks();
+			calcUks();
+			calcVkMinuses();
+		}
+	}
+	return *this;
 }
 
 vector3d_t stratifiedHemisphere::getDirection(int j, int k) {
 	if (j<0 || j>M || k<0 || k>N)
 		Y_INFO << "ERROR(stratifiedHemisphere.getDirection): j, k out of bound" << std::endl;
-	double s1 = rnd();
-	double s2 = rnd();
-	float tmp = (j+s1)/M;
+	float tmp = ((float)j+rnd())/(float)M;
+	float sinTheta = fSqrt(tmp);
+	float phi = M_2PI*((float)k+rnd())/N;
+	return vector3d_t(sinTheta * fCos(phi),
+					  sinTheta * fSin(phi),
+					  fSqrt(1 - tmp));
+}
+
+vector3d_t stratifiedHemisphere::getDirection(int j, int k, float s1, float s2) {
+	if (j<0 || j>M || k<0 || k>N)
+		Y_INFO << "ERROR(stratifiedHemisphere.getDirection): j, k out of bound" << std::endl;
+	float tmp = ((float)j+s1)/(float)M;
 	float sinTheta = fSqrt(tmp);
 	float phi = M_2PI*(k+s2)/N;
 	return vector3d_t(sinTheta * fCos(phi),
@@ -104,9 +181,9 @@ void stratifiedHemisphere::calcVkMinuses() {
 
 void stratifiedHemisphere::calcTanThetas() {
 	for (int j=0; j<M; j++) {
+		//tanTheta[j] = fTan(fAsin( fSqrt( ((float)j+0.5f) / (float) M ) ));
 		tanTheta[j] = fSqrt( ((float)j+0.5f) / ((float)M - (float)j - 0.5) );
 	}
-	// fTan(fAsin( fSqrt( ((float)j+0.5f) / (float) M ) ));
 }
 
 void stratifiedHemisphere::calcSinThetas() {
@@ -160,6 +237,10 @@ vector3d_t icRec_t::getSampleHemisphere(int j, int k) {
 	return changeBasis( stratHemi->getDirection(j, k), NU, NV, Nup );
 }
 
+vector3d_t icRec_t::getSampleHemisphere(int j, int k, float s1, float s2) {
+	return changeBasis( stratHemi->getDirection(j, k, s1, s2), NU, NV, Nup );
+}
+
 void icRec_t::changeSampleRadius(float newr) {
 	// we use minimal distance radius (without clamping for now)
 	if (newr < r) {
@@ -196,7 +277,7 @@ void icRec_t::setNup(const vector3d_t &wo) {
 
 bool icRec_t::inFront(const icRec_t &record) const {
 	float di = (P - record.P) * ((Nup + record.getNup() )/2.0f);
-	if (di < -0.001f) // small negative value, ¿it works?
+	if (di < -0.01f) // small negative value, ¿it works?
 		return true;
 	return false;
 }
@@ -349,7 +430,7 @@ void icTree_t::saveToXml(const std::string &fileName) {
 	int rc;
 	xmlTextWriterPtr writer;
 	// Create a new XmlWriter for uri
-	writer = xmlNewTextWriterFilename(fileName.c_str(), 0);
+	writer = xmlNewTextWriterFilename(fileName.c_str(), 1);
 	if (writer == NULL) {
 		Y_INFO << "testXmlwriterFilename: Error creating the xml writer" << std::endl;
 		return;
@@ -405,6 +486,7 @@ void icTree_t::saveToXml(const std::string &fileName) {
 				// Create Record node
 				xmlTextWriterStartElement(writer, BAD_CAST "ICRecord");
 				// Save members
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "pos", "%f,%f,%f", record.P.x, record.P.y, record.P.z );
 				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "r", "%f", record.r );
 				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rMin", "%f", record.rMin );
 				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rMax", "%f", record.rMax );
