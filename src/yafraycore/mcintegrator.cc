@@ -1,7 +1,7 @@
 /****************************************************************************
  *		mcintegrator.h: A basic abstract integrator for MC sampling
  *		This is part of the yafray package
- *		Copyright (C) 2010  Rodrigo Placencia (DarkTide)
+ *		Copyght (C) 2010  Rodrigo Placencia (DarkTide)
  *
  *		This library is free software; you can redistribute it and/or
  *		modify it under the terms of the GNU Lesser General Public
@@ -628,85 +628,87 @@ color_t mcIntegrator_t::sampleAmbientOcclusion(renderState_t &state, const surfa
 	return col / (float)n;
 }
 
-void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &record) const {
+void mcIntegrator_t::setICRecord(renderState_t &state, diffRay_t &ray, icRec_t *record) const {
 	if (!ray.hasDifferentials)
 		Y_INFO << "ERROR: ray from mcIntegrator_t::createNewICRecord() should have differentials" << std::endl;
-	float oldRayLength[record.getM()];
-	color_t oldRad[record.getM()];
+	float oldRayLength[record->getM()];
+	color_t oldRad[record->getM()];
 	// we set the projected pixel area on the surface point
-	record.setPixelArea(ray);
+	record->setPixelArea(ray);
 	ray_t sRay; // ray from hitpoint to hemisphere sample direction
-	sRay.from = record.P;
+	sRay.from = record->P;
 	color_t innerRotValues;
 	color_t innerTransValuesU;
 	color_t innerTransValuesV;
 	color_t radiance;
-	for (int k=0; k<record.getN(); k++) {
+	unsigned int offs = 8 * state.pixelSample /*+ state.samplingOffs*/;
+	record->stratHemi->randomize();
+	for (int k=0; k<record->getN(); k++) {
 		innerRotValues.black();
 		innerTransValuesU.black();
 		innerTransValuesV.black();
-		for (int j=0; j<record.getM(); j++) {
+		for (int j=0; j<record->getM(); j++) {
 			// Calculate each incoming radiance of hemisphere at point icRecord
-			sRay.dir = record.getSampleHemisphere(j, k);
+			sRay.dir = record->getSampleHemisphere(j, k, offs);
 			radiance = getRadiance(state, sRay);
 			// note: oldRad[j] and oldRayLength[j] means L_j,k-1 and r_j,k-1 respectively
 			//       oldRad[j-1] and oldRayLength[j-1] means L_j-1,k and r_j-1,k respectively
 			if (k>0) {
 				if (j>0) {
 					// cos2(theta_j-)sin(theta_j-) * (L_j,k - L_j-1,k) / min(r_j,k , r_j-1,k)
-					float cosThetaMin = record.stratHemi->getCosThetaMinus(j);
+					float cosThetaMin = record->stratHemi->getCosThetaMinus(j);
 					innerTransValuesU +=
 							( (cosThetaMin*cosThetaMin) * (radiance - oldRad[j-1]) )/
 							(fmin(sRay.tmax, oldRayLength[j-1])) ;
 					// cos(theta_j)[cos(theta_j-) - cos(theta_j+)] * (L_j,k - L_j,k-1) / [sin(theta_j,k) * min(r_j,k , r_j-1,k)]
 					innerTransValuesV +=
-							( record.stratHemi->getCosTheta(j) * (cosThetaMin - record.stratHemi->getCosThetaPlus(j)) *
+							( record->stratHemi->getCosTheta(j) * (cosThetaMin - record->stratHemi->getCosThetaPlus(j)) *
 								(radiance - oldRad[j]) ) /
-							(record.stratHemi->getSinTheta(j) * fmin(sRay.tmax, oldRayLength[j]));
+							(record->stratHemi->getSinTheta(j) * fmin(sRay.tmax, oldRayLength[j]));
 				}
 			}
-			record.irr += radiance;
-			record.changeSampleRadius(sRay.tmax);
+			record->irr += radiance;
+			record->changeSampleRadius(sRay.tmax);
 			// copy new rays and irradiance values over old ones
 			oldRad[j] = radiance;
 			oldRayLength[j] = sRay.tmax;
-			innerRotValues -= record.stratHemi->getTanTheta(j) * radiance;
+			innerRotValues -= record->stratHemi->getTanTheta(j) * radiance;
 		}
-		vector3d_t vk(record.stratHemi->getVk(k));
-		record.rotGrad[0] += vk * innerRotValues.R;
-		record.rotGrad[1] += vk * innerRotValues.G;
-		record.rotGrad[2] += vk * innerRotValues.B;
-		vector3d_t uk(record.stratHemi->getUk(k));
-		vector3d_t vkm(record.stratHemi->getVkMinus(k));
-		record.transGrad[0] +=
-				( (innerTransValuesU.R * M_2PI / (float)record.getN() ) * uk ) +
+		vector3d_t vk(record->stratHemi->getVk(k));
+		record->rotGrad[0] += vk * innerRotValues.R;
+		record->rotGrad[1] += vk * innerRotValues.G;
+		record->rotGrad[2] += vk * innerRotValues.B;
+		vector3d_t uk(record->stratHemi->getUk(k));
+		vector3d_t vkm(record->stratHemi->getVkMinus(k));
+		record->transGrad[0] +=
+				( (innerTransValuesU.R * M_2PI / (float)record->getN() ) * uk ) +
 				( innerTransValuesV.R * vkm );
-		record.transGrad[1] +=
-				( (innerTransValuesU.G * M_2PI / (float)record.getN() ) * uk ) +
+		record->transGrad[1] +=
+				( (innerTransValuesU.G * M_2PI / (float)record->getN() ) * uk ) +
 				( innerTransValuesV.G * vkm );
-		record.transGrad[2] +=
-				( (innerTransValuesU.B * M_2PI / (float)record.getN() ) * uk ) +
+		record->transGrad[2] +=
+				( (innerTransValuesU.B * M_2PI / (float)record->getN() ) * uk ) +
 				( innerTransValuesV.B * vkm );
 	}
-	float k = M_PI / ((float)record.getM() * (float)record.getN());
-	record.irr = record.irr * k;
+	float k = M_PI / ((float)record->getM() * (float)record->getN());
+	record->irr = record->irr * k;
 	for (int i=0; i<3; i++) {
-		record.rotGrad[i] = changeBasis(
-				record.rotGrad[i] * k,
-				record.NU,
-				record.NV,
-				record.getNup());
-		record.transGrad[i] = changeBasis(
-				record.transGrad[i],
-				record.NU,
-				record.NV,
-				record.getNup());
+		record->rotGrad[i] = changeBasis(
+				record->rotGrad[i] * k,
+				record->NU,
+				record->NV,
+				record->getNup());
+		record->transGrad[i] = changeBasis(
+				record->transGrad[i],
+				record->NU,
+				record->NV,
+				record->getNup());
 	}
 	// HEURISTICS
-	record.clampRbyGradient();
+	record->clampRbyGradient();
 	if (ray.hasDifferentials)
-		record.clampRbyScreenSpace();
-	record.clampGradient();
+		record->clampRbyScreenSpace();
+	record->clampGradient();
 }
 
 void mcIntegrator_t::cleanup() {

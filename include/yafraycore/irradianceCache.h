@@ -57,7 +57,8 @@ struct stratifiedHemisphere {
 
 	stratifiedHemisphere &operator=(const stratifiedHemisphere &strat);
 
-	vector3d_t getDirection(int j, int k); //!< get random direction sample from section j,k in local coordinate system
+	inline void randomize() { hal.setStart((unsigned int)time(0)); }
+	vector3d_t getDirection(int j, int k, unsigned int r); //!< get random direction sample from section j,k in local coordinate system
 	vector3d_t getDirection(int j, int k, float s1, float s2); //!< get random direction sample from section j,k in local coordinate system
 	inline const vector3d_t &getVk(int k) const { return vk[k]; } //!< get vector v_k: base-plane vector in the direction (pi/2, phi_k + pi/2)
 	inline const vector3d_t &getVkMinus(int k) const { return vkMinus[k]; } //!< get vector v_k: base-plane vector in the direction (pi/2, phi_k + pi/2)
@@ -94,7 +95,7 @@ private:
 	float *cosTheta;
 	float *cosThetaMinus;
 	float *cosThetaPlus;
-	random_t rnd; //!< random number generator
+	Halton hal; //!< random number generator
 };
 
 
@@ -104,7 +105,7 @@ struct icRec_t : public surfacePoint_t
 	icRec_t(float kappa, stratifiedHemisphere *strat);
 	icRec_t(float kappa, const surfacePoint_t &sp, stratifiedHemisphere *strat);
 	// METHODS
-	vector3d_t		getSampleHemisphere(int j, int k); //!< compute indirect light with direct lighting of first bounce
+	vector3d_t		getSampleHemisphere(int j, int k, unsigned int r); //!< compute indirect light with direct lighting of first bounce
 	vector3d_t		getSampleHemisphere(int j, int k, float s1, float s2); //!< compute indirect light with direct lighting of first bounce
 	float			getWeight(const icRec_t &record) const;
 	inline float	getRadius() const { return rClamp; } //!< return the radius of the sample "action" area
@@ -140,28 +141,28 @@ private:
 };
 
 
-struct icTree_t : public octree_t<icRec_t>
+struct icTree_t : public octree_t<icRec_t *>
 {
 	icTree_t(const bound_t &bound, int levels, int m):
-			octree_t<icRec_t>(bound, levels), stratHemi(m), totalRecords(0) {}
+			octree_t<icRec_t *>(bound, levels), stratHemi(m), totalRecords(0) {}
 	//! Get irradiance estimation at point p. Return false if there isn't a cached irradiance sample near.
-	bool getIrradiance(icRec_t &record);
+	bool getIrradiance(icRec_t *record);
 	//! Add a new cached irradiance sample
-	void add(const icRec_t &record);
+	void add(icRec_t *record);
 	//! Perform neighbor clamping on record
-	void neighborClamp(icRec_t &record);
+	void neighborClamp(icRec_t *record);
 	//! Store the entire tree (with IC records data) into an xml file named fileName
 	void saveToXml(const std::string &fileName);
 	unsigned int getTotalRecords() const { return totalRecords; }
 	stratifiedHemisphere stratHemi;
 private:
-	void recursiveFindNear(octNode_t<icRec_t> *node, const bound_t &nodeBound, const icRec_t &record,
+	void recursiveFindNear(octNode_t<icRec_t *> *node, bound_t &nodeBound, const icRec_t *record,
 						   std::vector<icRec_t *> &nearRecs, float &minR);
 	struct icLookup_t {
-		icLookup_t(const icRec_t &rec): record(rec),totalWeight(0.f) {}
-		bool operator()(const point3d_t &p, const icRec_t &record);
+		icLookup_t(const icRec_t *rec): record(rec),totalWeight(0.f) {}
+		bool operator()(const point3d_t &p, const icRec_t *record);
 		std::vector<color_t> radSamples;
-		const icRec_t &record;
+		const icRec_t *record;
 		float totalWeight;
 	};
 	unsigned int totalRecords;

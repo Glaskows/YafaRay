@@ -59,7 +59,7 @@ class YAFRAYCORE_EXPORT mcIntegrator_t: public tiledIntegrator_t
 		  \param ray ray that hits the surface where the icRecord will be created
 		  \param record the record that it is going to be used to save the irradiance, needs to be initialized with ray's intersect position
 		  */
-		virtual void setICRecord(renderState_t &state, diffRay_t &ray, icRec_t &record) const;
+		virtual void setICRecord(renderState_t &state, diffRay_t &ray, icRec_t *record) const;
 		virtual void cleanup();
 
 		int rDepth; //! Ray depth0

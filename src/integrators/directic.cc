@@ -163,15 +163,15 @@ colorA_t directIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 			// check for an interpolated result
 			if (useIrradianceCache) {
 				if (ray.hasDifferentials) {
-					icRec_t icRecord(icKappa, sp, &(icTree->stratHemi) ); // M, Kappa
-					icRecord.setNup(wo);
-					icRecord.setPixelArea(ray);
+					icRec_t *icRecord = new icRec_t(icKappa, sp, &(icTree->stratHemi) ); // M, Kappa
+					icRecord->setNup(wo);
+					icRecord->setPixelArea(ray);
 					if (!icTree->getIrradiance(icRecord)) {
 						setICRecord(state, ray, icRecord);
 						icTree->neighborClamp(icRecord);
 						icTree->add(icRecord);
 					}
-					col += icRecord.irr * icRecord.material->eval(state, icRecord, wo, icRecord.getNup(), BSDF_DIFFUSE) * M_1_PI;
+					col += icRecord->irr * icRecord->material->eval(state, *icRecord, wo, icRecord->getNup(), BSDF_DIFFUSE) * M_1_PI;
 				} else
 					Y_INFO << "NO DIFFERENTIALS!!!" << std::endl;
 			}

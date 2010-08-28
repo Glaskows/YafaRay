@@ -867,16 +867,16 @@ colorA_t photonIC_t::integrate(renderState_t &state, diffRay_t &ray) const
 							ray.xdir = dx*dU + (dy+1.f)*dV + ray.dir;
 							ray.hasDifferentials = true;
 						}
-						icRec_t icRecord(icKappa, sp, &(icTree->stratHemi) ); // M, Kappa
-						icRecord.setNup(wo);
-						icRecord.setPixelArea(ray);
+						icRec_t *icRecord = new icRec_t(icKappa, sp, &(icTree->stratHemi) ); // M, Kappa
+						icRecord->setNup(wo);
+						icRecord->setPixelArea(ray);
 						if (!icTree->getIrradiance(icRecord)) {
 							setICRecord(state, ray, icRecord);
 							icTree->neighborClamp(icRecord);
 							icTree->add(icRecord);
 						}
-						col += icRecord.irr * M_1_PI *
-							   icRecord.material->eval(state, icRecord, wo, icRecord.getNup(), BSDF_DIFFUSE);
+						col += icRecord->irr * M_1_PI *
+							   icRecord->material->eval(state, *icRecord, wo, icRecord->getNup(), BSDF_DIFFUSE);
 					} else {
 						col += finalGathering(state, sp, wo);
 					}
@@ -1002,7 +1002,7 @@ void photonIC_t::cleanup() {
 
 color_t photonIC_t::finalIC(renderState_t &state, const surfacePoint_t &sp, const vector3d_t &wo) const
 {
-	color_t pathCol(0.0);
+	/*color_t pathCol(0.0);
 	void *first_udat = state.userdata;
 	unsigned char userdata[USER_DATA_SIZE+7];
 	void *n_udat = (void *)( &userdata[7] - ( ((size_t)&userdata[7])&7 ) ); // pad userdata to 8 bytes
@@ -1178,7 +1178,9 @@ color_t photonIC_t::finalIC(renderState_t &state, const surfacePoint_t &sp, cons
 		}
 		state.userdata = first_udat;
 	}
-	return pathCol / (float)nSampl;
+	return pathCol / (float)nSampl;*/
+	color_t color;
+	return color;
 }
 
 extern "C"

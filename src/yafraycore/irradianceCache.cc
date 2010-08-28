@@ -34,7 +34,8 @@ __BEGIN_YAFRAY
 
 // stratifiedHemisphere METHODS
 // ***********************************************************************
-stratifiedHemisphere::stratifiedHemisphere(int nm):M(nm), N(M_PI * M), rnd(time(0)) {
+stratifiedHemisphere::stratifiedHemisphere(int nm):M(nm), N(M_PI * M), hal(2) {
+	hal.setStart(time(0));
 	vk = new vector3d_t[N];
 	vkMinus = new vector3d_t[N];
 	uk = new vector3d_t[N];
@@ -56,7 +57,8 @@ stratifiedHemisphere::stratifiedHemisphere(int nm):M(nm), N(M_PI * M), rnd(time(
 	calcVkMinuses();
 }
 
-stratifiedHemisphere::stratifiedHemisphere(const stratifiedHemisphere &strat): rnd(time(0)) {
+stratifiedHemisphere::stratifiedHemisphere(const stratifiedHemisphere &strat): hal(2) {
+	hal.setStart(time(0));
 	if (this != &strat) {
 		if (&strat == NULL) {
 			M = N = 0;
@@ -98,6 +100,7 @@ stratifiedHemisphere::~stratifiedHemisphere() {
 }
 
 stratifiedHemisphere & stratifiedHemisphere::operator=(const stratifiedHemisphere &strat) {
+	hal.setStart(time(0));
 	if (&strat != NULL && this != &strat) {
 		if (M != strat.getM()) {
 			M = strat.getM();
@@ -136,12 +139,14 @@ stratifiedHemisphere & stratifiedHemisphere::operator=(const stratifiedHemispher
 	return *this;
 }
 
-vector3d_t stratifiedHemisphere::getDirection(int j, int k) {
+vector3d_t stratifiedHemisphere::getDirection(int j, int k, unsigned int r) {
 	if (j<0 || j>M || k<0 || k>N)
 		Y_INFO << "ERROR(stratifiedHemisphere.getDirection): j, k out of bound" << std::endl;
-	float tmp = ((float)j+rnd())/(float)M;
+	float s1 = RI_vdC(j+k+r);
+	float s2 = hal.getNext();
+	float tmp = ((float)j+s1)/(float)M;
 	float sinTheta = fSqrt(tmp);
-	float phi = M_2PI*((float)k+rnd())/N;
+	float phi = M_2PI*((float)k+s2)/N;
 	return vector3d_t(sinTheta * fCos(phi),
 					  sinTheta * fSin(phi),
 					  fSqrt(1 - tmp));
@@ -233,8 +238,8 @@ icRec_t::icRec_t(float kappa, const surfacePoint_t &sp, stratifiedHemisphere *st
 	r = std::numeric_limits<float>::max();
 }
 
-vector3d_t icRec_t::getSampleHemisphere(int j, int k) {
-	return changeBasis( stratHemi->getDirection(j, k), NU, NV, Nup );
+vector3d_t icRec_t::getSampleHemisphere(int j, int k, unsigned int r) {
+	return changeBasis( stratHemi->getDirection(j, k, r), NU, NV, Nup );
 }
 
 vector3d_t icRec_t::getSampleHemisphere(int j, int k, float s1, float s2) {
@@ -309,31 +314,31 @@ void icRec_t::setRNeighbor(float r) {
 //
 // ***********************************************************************
 
-void icTree_t::add(const icRec_t &rec) {
+void icTree_t::add(icRec_t *rec) {
 	lock.writeLock();
-	const bound_t &bound = rec.getBound();
+	const bound_t &bound = rec->getBound();
 	recursiveAdd(&root, treeBound, rec, bound,
-				 2*rec.getRadius()*M_SQRT3 ); // 2*r*sqrt(3) = (bound.a - bound.g).length
+				 2*rec->getRadius()*M_SQRT3 ); // 2*r*sqrt(3) = (bound.a - bound.g).length
 	lock.unlock();
 	totalRecords++;
 }
 
-bool icTree_t::icLookup_t::operator()(const point3d_t &p, const icRec_t &sample) { // point p isn't used
-	if (!record.inFront(sample)) {
-		float weight = sample.getWeight(record);
+bool icTree_t::icLookup_t::operator()(const point3d_t &p, const icRec_t *sample) { // point p isn't used
+	if (!record->inFront(*sample)) {
+		float weight = sample->getWeight(*record);
 		if (weight > 0.f) { // TODO: see if weight > 0 is correct or should be a small number
 			// get weighted irradiance sample = E_i(p) * w_i(p)
 			// E_i(p) = E_i + (n_i x n) * drotE_i
 			color_t rotGradResult, transGradResult;
-			vector3d_t NCross = record.getNup() ^ sample.getNup(); // should be normalized already
-			rotGradResult.R = NCross * sample.rotGrad[0];
-			rotGradResult.G = NCross * sample.rotGrad[1];
-			rotGradResult.B = NCross * sample.rotGrad[2];
-			vector3d_t posDif = record.P - sample.P;
-			transGradResult.R = posDif * sample.transGrad[0];
-			transGradResult.G = posDif * sample.transGrad[1];
-			transGradResult.B = posDif * sample.transGrad[2];
-			radSamples.push_back( (sample.irr + rotGradResult + transGradResult) * weight );
+			vector3d_t NCross = record->getNup() ^ sample->getNup(); // should be normalized already
+			rotGradResult.R = NCross * sample->rotGrad[0];
+			rotGradResult.G = NCross * sample->rotGrad[1];
+			rotGradResult.B = NCross * sample->rotGrad[2];
+			vector3d_t posDif = record->P - sample->P;
+			transGradResult.R = posDif * sample->transGrad[0];
+			transGradResult.G = posDif * sample->transGrad[1];
+			transGradResult.B = posDif * sample->transGrad[2];
+			radSamples.push_back( (sample->irr + rotGradResult + transGradResult) * weight );
 			totalWeight += weight;
 		}
 	} else {
@@ -342,26 +347,26 @@ bool icTree_t::icLookup_t::operator()(const point3d_t &p, const icRec_t &sample)
 	return true; // when could it be false? example?
 }
 
-void icTree_t::recursiveFindNear(octNode_t<icRec_t> *node, const bound_t &nodeBound,
-								 const icRec_t &record, std::vector<icRec_t *> &nearRecs,
+void icTree_t::recursiveFindNear(octNode_t<icRec_t *> *node, bound_t &nodeBound,
+								 const icRec_t *record, std::vector<icRec_t *> &nearRecs,
 								 float &minR) {
 	for (unsigned int i = 0; i < node->data.size(); ++i) {
 		// pass the "in front" test
-		if (!record.inFront(node->data[i])) {
-			float distance = (record.P - (node->data[i]).P).length();
+		if (!record->inFront( *(node->data[i]) ) ) {
+			float distance = (record->P - (node->data[i])->P).length();
 			// if both radius overlaps
-			if ( distance <= (record.r + (node->data[i]).r) ) {
-				float rSum = (node->data[i]).r + distance;
+			if ( distance <= (record->r + (node->data[i])->r) ) {
+				float rSum = (node->data[i])->r + distance;
 				// checks for triangule inequality
-				if ( rSum < record.r ){
+				if ( rSum < record->r ){
 					minR = std::min( minR, rSum );
 					// add pointer to record to nearRecs
-					nearRecs.push_back(&(node->data[i]));
+					nearRecs.push_back(node->data[i]);
 				}
 			}
 		}
 	}
-	bound_t dataBound(record.P-record.r, record.P+record.r);
+	bound_t dataBound(record->P-record->r, record->P+record->r);
 	// check on all the childrens that the records radius overlap
 	point3d_t center = nodeBound.center();
 	// Determine which children the item overlaps
@@ -388,41 +393,41 @@ void icTree_t::recursiveFindNear(octNode_t<icRec_t> *node, const bound_t &nodeBo
 	}
 }
 
-void icTree_t::neighborClamp(icRec_t &record) {
+void icTree_t::neighborClamp(icRec_t *record) {
 	// perform lock in tree, so we can't add other records at the same time
 	lock.readLock();
 	// if record is outside the scene don't do anything
-	if (!treeBound.includes(record.P)) return;
+	if (!treeBound.includes(record->P)) return;
 	// create the vector to store all the neighbors
 	std::vector<icRec_t *> nearRecs;
 	// set neighbor clamped radius equal to the original distance to surfaces
-	float minR = record.r;
+	float minR = record->r;
 	// search for all the near records
 	recursiveFindNear(&root, treeBound, record, nearRecs, minR);
 	// perform neighbor clamp on record
-	record.setRNeighbor(minR);
-	record.clampRbyNeighbor();
+	record->setRNeighbor(minR);
+	record->clampRbyNeighbor();
 	// perform neighbor clamp to neighbors
 	for (unsigned int i=0; i<nearRecs.size(); i++) {
-		nearRecs[i]->setRNeighbor(minR + (nearRecs[i]->P - record.P).length());
+		nearRecs[i]->setRNeighbor(minR + (nearRecs[i]->P - record->P).length());
 		nearRecs[i]->clampRbyNeighbor();
 	}
 	// TODO: neighbor clamp algorith
 	lock.unlock();
 }
 
-bool icTree_t::getIrradiance(icRec_t &record) {
+bool icTree_t::getIrradiance(icRec_t *record) {
 	icLookup_t lookupProc(record);
-	lookup(record.P, lookupProc); // ads weighted radiance values to vector
+	lookup(record->P, lookupProc); // ads weighted radiance values to vector
 	// if there is no good irradiance sample return false
 	if (lookupProc.radSamples.size() == 0) {
 		return false;
 	}
 	// calculate Sum(E_i(p) * w_i(p))
 	for (unsigned int i=0; i<lookupProc.radSamples.size(); i++) {
-		record.irr += lookupProc.radSamples[i];
+		record->irr += lookupProc.radSamples[i];
 	}
-	record.irr = record.irr / lookupProc.totalWeight; // E(p) = Sum(E_i(p) * w_i(p)) / Sum(w_i(p))
+	record->irr = record->irr / lookupProc.totalWeight; // E(p) = Sum(E_i(p) * w_i(p)) / Sum(w_i(p))
 	return true;
 }
 
@@ -443,7 +448,7 @@ void icTree_t::saveToXml(const std::string &fileName) {
 										   "%f,%f,%f", treeBound.a.x, treeBound.a.y, treeBound.a.z );
 	xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "boundMax",
 										   "%f,%f,%f", treeBound.g.x, treeBound.g.y, treeBound.g.z );
-	octNode_t<icRec_t> *nodes[maxDepth+1];
+	octNode_t<icRec_t *> *nodes[maxDepth+1];
 	int sibling[maxDepth+1];
 	int level = 0;
 	nodes[0] = &root;
@@ -482,27 +487,27 @@ void icTree_t::saveToXml(const std::string &fileName) {
 			// PROCESS DATA
 			int size = nodes[level]->data.size();
 			for (int i=0; i<size; i++) {
-				const icRec_t &record = nodes[level]->data[i];
+				icRec_t *record = nodes[level]->data[i];
 				// Create Record node
 				xmlTextWriterStartElement(writer, BAD_CAST "ICRecord");
 				// Save members
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "pos", "%f,%f,%f", record.P.x, record.P.y, record.P.z );
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "r", "%f", record.r );
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rMin", "%f", record.rMin );
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rMax", "%f", record.rMax );
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rNeighbor", "%f", record.rNeighbor );
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rClamp", "%f", record.getRadius() );
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "irr", "%f,%f,%f", record.irr.R, record.irr.G, record.irr.B );
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "nUp", "%f,%f,%f", record.getNup().x, record.getNup().y, record.getNup().z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "pos", "%f,%f,%f", record->P.x, record->P.y, record->P.z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "r", "%f", record->r );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rMin", "%f", record->rMin );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rMax", "%f", record->rMax );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rNeighbor", "%f", record->rNeighbor );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "rClamp", "%f", record->getRadius() );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "irr", "%f,%f,%f", record->irr.R, record->irr.G, record->irr.B );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "nUp", "%f,%f,%f", record->getNup().x, record->getNup().y, record->getNup().z );
 				xmlTextWriterStartElement(writer, BAD_CAST "RotGrad");
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "r", "%f,%f,%f", record.rotGrad[0].x, record.rotGrad[0].y, record.rotGrad[0].z );
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "g", "%f,%f,%f", record.rotGrad[1].x, record.rotGrad[1].y, record.rotGrad[1].z );
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "b", "%f,%f,%f", record.rotGrad[2].x, record.rotGrad[2].y, record.rotGrad[2].z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "r", "%f,%f,%f", record->rotGrad[0].x, record->rotGrad[0].y, record->rotGrad[0].z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "g", "%f,%f,%f", record->rotGrad[1].x, record->rotGrad[1].y, record->rotGrad[1].z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "b", "%f,%f,%f", record->rotGrad[2].x, record->rotGrad[2].y, record->rotGrad[2].z );
 				xmlTextWriterEndElement(writer);
 				xmlTextWriterStartElement(writer, BAD_CAST "TransGrad");
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "r", "%f,%f,%f", record.transGrad[0].x, record.transGrad[0].y, record.transGrad[0].z );
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "g", "%f,%f,%f", record.transGrad[1].x, record.transGrad[1].y, record.transGrad[1].z );
-				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "b", "%f,%f,%f", record.transGrad[2].x, record.transGrad[2].y, record.transGrad[2].z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "r", "%f,%f,%f", record->transGrad[0].x, record->transGrad[0].y, record->transGrad[0].z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "g", "%f,%f,%f", record->transGrad[1].x, record->transGrad[1].y, record->transGrad[1].z );
+				xmlTextWriterWriteFormatAttribute(writer, BAD_CAST "b", "%f,%f,%f", record->transGrad[2].x, record->transGrad[2].y, record->transGrad[2].z );
 				xmlTextWriterEndElement(writer);
 				// Close Record node
 				xmlTextWriterEndElement(writer);
